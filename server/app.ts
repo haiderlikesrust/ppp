@@ -1,0 +1,193 @@
+import Fastify from 'fastify';
+import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { Keypair } from '@solana/web3.js';
+import { z } from 'zod';
+import { config, configBlockers } from './config';
+import { trustInternalProxies } from './proxy';
+import { challenge, verify, sessionWallet, hashSession, createSession } from './auth';
+import { audit } from './db';
+import { createServices, startCoordinator, type Services } from './services';
+import { MockPacks, MockSolana } from './mock';
+import { loadCalibration } from './calibration';
+import { settingsSchema } from './settings';
+import { settingsProblems } from '../shared/protection';
+
+const COOKIE = 'pp_session';
+const wallet = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+
+export function originAllowed(method: string, origin: string | undefined, fetchSite: string | undefined, appOrigin: string) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return true;
+  return fetchSite !== 'cross-site' && (!origin || origin === appOrigin);
+}
+
+export async function createApp(options: { services?: Services; timers?: boolean; logger?: boolean } = {}) {
+  const app = Fastify({ logger: options.logger ?? true, bodyLimit: 16_384, requestTimeout: 30_000, trustProxy: trustInternalProxies(config.TRUST_PROXY_HOPS) });
+  await app.register(cookie);
+  const s = options.services ?? await createServices();
+  // Per-IP request limits protect the live API from bots. Locally every tab and script shares
+  // 127.0.0.1 and there is nothing to protect, so practice mode skips them.
+  await app.register(rateLimit, {
+    max: 120, timeWindow: '1 minute', allowList: () => s.practice,
+    errorResponseBuilder: (_req, context) => ({ statusCode: 429, message: `Too many requests. Please wait ${context.after} and try again.` }),
+  });
+  const { db, serial } = s;
+
+  app.addHook('onRequest', async (req, reply) => { if (!originAllowed(req.method, req.headers.origin, req.headers['sec-fetch-site'] as string | undefined, config.APP_ORIGIN)) return reply.code(403).send({ error: 'Request origin is not allowed.' }); });
+  app.addHook('onSend', async (req, reply, payload) => { if (req.url.startsWith('/api')) reply.header('Cache-Control', 'no-store'); reply.header('X-Content-Type-Options', 'nosniff').header('X-Frame-Options', 'DENY').header('Referrer-Policy', 'no-referrer'); return payload; });
+  app.setErrorHandler((error, req, reply) => {
+    const e = error as Error & { statusCode?: number };
+    if (e instanceof z.ZodError) return reply.code(400).send({ error: 'Check the submitted fields.', fields: e.issues.map(i => i.path.join('.')) });
+    if ((e.statusCode ?? 400) >= 500) app.log.error({ message: e.message, path: req.url }, 'Request failed');
+    return reply.code(e.statusCode ?? 400).send({ error: e.message });
+  });
+
+  const auth = async (req: any, owner = false) => {
+    const session = await sessionWallet(db, req.cookies[COOKIE]);
+    if (!session) throw Object.assign(new Error('Connect and sign in with your wallet.'), { statusCode: 401 });
+    if (owner && !session.owner && !s.practice) throw Object.assign(new Error('Owner access required.'), { statusCode: 403 });
+    return session;
+  };
+  const setSession = (reply: any, token: string) => reply.setCookie(COOKIE, token, { path: '/', httpOnly: true, sameSite: 'strict', secure: config.APP_ORIGIN.startsWith('https:'), maxAge: 86_400 });
+
+  app.get('/api/health', { config: { rateLimit: false } }, async (_req, reply) => {
+    try { await db.query('SELECT 1'); } catch { return reply.code(503).send({ ok: false, service: 'pull-protection' }); }
+    return { ok: true, service: 'pull-protection', mode: s.practice ? 'practice' : config.live ? 'mainnet' : 'read-only', database: config.DATABASE_URL ? 'postgres' : 'embedded-postgres', spendingEnabled: config.live && !s.settings.current.paused };
+  });
+  app.get('/api/config', async () => ({ mode: s.practice ? 'practice' : config.live ? 'mainnet' : 'read-only', mint: s.solana.holderMint, poolAddress: s.solana.poolAddress, opsAddress: s.solana.opsAddress, settings: publicSettings(s) }));
+
+  app.post('/api/auth/challenge', { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } }, async req => { const body = z.object({ wallet }).parse(req.body); return serial.run(() => challenge(db, body.wallet)); });
+  app.post('/api/auth/verify', { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const body = z.object({ id: z.string().uuid(), signature: z.string().max(100) }).parse(req.body);
+    const result = await serial.run(() => verify(db, body.id, body.signature));
+    // The activation snapshot is what later off-site claims measure holdings from.
+    await s.holders.snapshot(result.wallet).catch(() => {});
+    setSession(reply, result.token);
+    return { wallet: result.wallet };
+  });
+  app.post('/api/auth/logout', async (req, reply) => { const token = req.cookies[COOKIE]; if (token) await db.query('DELETE FROM sessions WHERE id=$1', [hashSession(token)]); reply.clearCookie(COOKIE, { path: '/' }); return { ok: true }; });
+
+  app.get('/api/me', async req => {
+    const session = await sessionWallet(db, req.cookies[COOKIE]);
+    if (!session) return { wallet: null };
+    let holder = null;
+    try { holder = await s.holders.view(session.wallet, session.activatedAt); } catch { /* RPC trouble should not sign anyone out */ }
+    return { wallet: session.wallet, owner: session.owner || s.practice, activatedAt: session.activatedAt, holder };
+  });
+
+  app.get('/api/packs', async req => {
+    const session = await sessionWallet(db, req.cookies[COOKIE]);
+    return { packs: await s.orders.quotes(session?.wallet ?? null) };
+  });
+  app.post('/api/orders', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
+    const session = await auth(req);
+    const { priceUsd } = z.object({ priceUsd: z.number().int().positive() }).parse(req.body);
+    return serial.run(() => s.orders.create(session.wallet, priceUsd));
+  });
+  app.post('/api/orders/:id/pay', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
+    const session = await auth(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { signed } = z.object({ signed: z.string().min(1).max(2_000) }).parse(req.body);
+    return serial.run(() => s.orders.pay(session.wallet, id, signed));
+  });
+  app.get('/api/orders/:id', async req => { const session = await auth(req); const { id } = z.object({ id: z.string().uuid() }).parse(req.params); return s.orders.get(id, session.wallet); });
+  app.get('/api/orders', async req => { const session = await auth(req); return { orders: await s.orders.list(session.wallet) }; });
+
+  app.get('/api/claims/scan', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async req => {
+    const session = await auth(req);
+    return { candidates: await s.claims.scan(session.wallet, session.activatedAt), claims: await s.claims.list(session.wallet) };
+  });
+  app.post('/api/claims/:memo', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
+    const session = await auth(req);
+    const { memo } = z.object({ memo: z.string().regex(/^cc-[a-f0-9-]{36}$/) }).parse(req.params);
+    return serial.run(() => s.claims.claim(session.wallet, session.activatedAt, memo));
+  });
+
+  app.get('/api/pool', async () => s.pool.view());
+  app.get('/api/activity', async () => ({ items: await s.pool.activity() }));
+
+  app.get('/api/admin', async req => {
+    await auth(req, true);
+    const calibration = await loadCalibration();
+    return {
+      settings: s.settings.current, blockers: s.practice ? ['Practice mode: in-memory Solana and a mocked Collector Crypt'] : configBlockers(),
+      problems: settingsProblems(s.settings.current, calibration?.distributions ?? []), calibration,
+      review: (await db.query("SELECT id,wallet,status,error,updated_at::text FROM orders WHERE status='review' ORDER BY updated_at DESC LIMIT 50")).rows,
+      jobs: (await db.query("SELECT id,kind,status,error,updated_at::text FROM jobs WHERE status IN ('failed','retryable','submitted','prepared') ORDER BY updated_at DESC LIMIT 50")).rows,
+      audit: (await db.query('SELECT id::text,event,data,created_at::text FROM audit ORDER BY id DESC LIMIT 50')).rows,
+    };
+  });
+  app.patch('/api/admin/settings', async req => {
+    const session = await auth(req, true);
+    const next = settingsSchema.parse(req.body);
+    const problems = settingsProblems(next, (await loadCalibration())?.distributions ?? []);
+    if (problems.length) throw Object.assign(new Error(problems.join(' ')), { statusCode: 422 });
+    await serial.run(async () => { await s.settings.save(next); await audit(db, 'settings-updated', { wallet: session.wallet, settings: next }); });
+    return { settings: s.settings.current };
+  });
+  app.post('/api/admin/orders/:id/resolve', async req => {
+    const session = await auth(req, true);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { action } = z.object({ action: z.enum(['retry', 'refund']) }).parse(req.body);
+    await serial.run(async () => { await s.orders.resolve(id, action); await audit(db, 'order-resolved', { wallet: session.wallet, id, action }); });
+    return { ok: true };
+  });
+  app.post('/api/admin/treasury/run', async req => { await auth(req, true); return serial.run(() => s.treasury.run()); });
+
+  // Practice-only helpers. They do not exist when real Solana is wired in.
+  if (s.practice && s.solana instanceof MockSolana && s.packs instanceof MockPacks) {
+    const mock = s.solana, packs = s.packs;
+    app.post('/api/practice/login', async (req, reply) => {
+      const body = z.object({ wallet: wallet.optional() }).parse(req.body ?? {});
+      const address = body.wallet ?? Keypair.generate().publicKey.toBase58();
+      const session = await serial.run(() => createSession(db, address));
+      await s.holders.snapshot(address);
+      setSession(reply, session.token);
+      return { wallet: address };
+    });
+    app.post('/api/practice/holdings', async req => {
+      const session = await auth(req);
+      const { ppm } = z.object({ ppm: z.number().int().min(0).max(1_000_000) }).parse(req.body);
+      mock.setHolderPpm(session.wallet, ppm);
+      return s.holders.view(session.wallet, session.activatedAt);
+    });
+    // Moves activation and holdings history back in time so off-site coverage can be tried immediately.
+    app.post('/api/practice/backdate', async req => {
+      const session = await auth(req);
+      const { hours } = z.object({ hours: z.number().min(1).max(24 * 30) }).parse(req.body);
+      const at = Date.now() - hours * 3_600_000;
+      await serial.run(async () => { await db.query('UPDATE wallets SET activated_at=LEAST(activated_at,$2) WHERE wallet=$1', [session.wallet, at]); await s.holders.snapshot(session.wallet, at); });
+      return { activatedAt: at };
+    });
+    app.post('/api/practice/offsite-pull', async req => {
+      const session = await auth(req);
+      const { priceUsd, hoursAgo } = z.object({ priceUsd: z.number().int().positive(), hoursAgo: z.number().min(0).max(24 * 30) }).parse(req.body);
+      return packs.offsitePull(mock, session.wallet, priceUsd, Date.now() - hoursAgo * 3_600_000);
+    });
+    app.post('/api/practice/fund-pool', async req => {
+      await auth(req);
+      const { usd } = z.object({ usd: z.number().positive().max(1_000_000) }).parse(req.body);
+      mock.fundPool(Math.round(usd * 1e6)); s.pool.invalidate();
+      await serial.run(() => audit(db, 'practice-pool-funded', { usd }));
+      return s.pool.view();
+    });
+  }
+
+  const dist = resolve('dist');
+  if (existsSync(dist)) {
+    await app.register(fastifyStatic, { root: dist, wildcard: false });
+    app.setNotFoundHandler((req, reply) => req.url.startsWith('/api') ? reply.code(404).send({ error: 'Not found.' }) : reply.sendFile('index.html'));
+  }
+
+  const stop = options.timers === false ? () => {} : startCoordinator(s, (message, error) => app.log.error({ message: (error as Error)?.message }, message));
+  app.addHook('onClose', async () => { stop(); await serial.run(() => db.close()); });
+  return { app, services: s };
+}
+
+function publicSettings(s: Services) {
+  const c = s.settings.current;
+  return { feeBps: c.feeBps, poolShareBps: c.poolShareBps, tiers: c.tiers, maxRebateUsd: c.maxRebateUsd, offsiteHoldHours: c.offsiteHoldHours, onsiteHoldHours: c.onsiteHoldHours, offsiteActivationHours: c.offsiteActivationHours, offsite: { enabled: c.offsite.enabled, claimWindowDays: c.offsite.claimWindowDays, perWalletDailyClaims: c.offsite.perWalletDailyClaims, perWalletDailyUsd: c.offsite.perWalletDailyUsd, perWalletWeeklyUsd: c.offsite.perWalletWeeklyUsd, dailyPoolBps: c.offsite.dailyPoolBps, targetReserveUsd: c.offsite.targetReserveUsd }, breaker: c.breaker, pausedPrices: c.pausedPrices, paused: c.paused };
+}

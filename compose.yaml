@@ -1,0 +1,18 @@
+# Local development database only. Set DATABASE_URL=postgres://pullprotection:pp_local@127.0.0.1:54330/pullprotection
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: pullprotection
+      POSTGRES_PASSWORD: pp_local
+      POSTGRES_DB: pullprotection
+    ports:
+      - "127.0.0.1:54330:5432"
+    volumes:
+      - pull-protection-dev-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pullprotection"]
+      interval: 5s
+      retries: 10
+volumes:
+  pull-protection-dev-db:
