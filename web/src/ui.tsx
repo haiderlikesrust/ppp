@@ -54,8 +54,9 @@ export function Slab({ card, priceUsd, size = 'md' }: { card: Pick<Card, 'name' 
     </div>
     <div className="mt-1.5 overflow-hidden rounded-lg border border-line">
       {card.image ? <img src={card.image} alt={card.name} referrerPolicy="no-referrer" className="aspect-[5/7] w-full object-cover" />
-        : <div className="relative grid aspect-[5/7] place-items-center" style={{ background: `${color}1f` }}>
-          <div className={`grid place-items-center rounded-full font-bold text-white ${small ? 'size-8 text-base' : 'size-20 text-4xl'}`} style={{ background: color }}>{name?.[0]}</div>
+        : <div className="@container relative grid aspect-[5/7] place-items-center" style={{ background: `${color}1f` }}>
+          {/* Sized to the slab so narrow slabs (the hero example on phones) never overflow. */}
+          <div className={`grid aspect-square place-items-center rounded-full font-bold text-white ${small ? 'size-8 text-base' : 'w-[62cqw] max-w-20 text-[min(2.25rem,28cqw)]'}`} style={{ background: color }}>{name?.[0]}</div>
           {hit && <div className="absolute right-1.5 top-1.5 rounded-full bg-yellow px-1.5 text-[9px] font-bold">HIT</div>}
         </div>}
     </div>

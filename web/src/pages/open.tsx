@@ -6,6 +6,7 @@ import { Link, useApp } from '../app';
 import { ensureSigner, hasSigner, signPayment } from '../wallet';
 import { CoverageLadder } from '../parts/holder';
 import { ContractAddress } from '../parts/contract';
+import { XLogo, X_HANDLE, X_URL } from '../parts/social';
 import { Modal, PackArt, RebateBar, SectionTitle, Slab, packStyle } from '../ui';
 
 type Pack = { priceUsd: number; quote: Quote };
@@ -21,6 +22,7 @@ export function OpenPage() {
   const [history, setHistory] = useState<OrderView[]>([]);
   const [order, setOrder] = useState<OrderView | null>(null);
   const [opening, setOpening] = useState<number | null>(null);
+  const [allActivity, setAllActivity] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const load = useCallback(() => {
@@ -32,6 +34,10 @@ export function OpenPage() {
   }, [me.wallet, notify]);
   useEffect(load, [load, version]);
   useEffect(() => () => clearInterval(timer.current), []);
+  useEffect(() => {
+    const id = setInterval(() => { if (!document.hidden) api<{ items: Activity[] }>('/activity').then(r => setActivity(r.items)).catch(() => {}); }, 20_000);
+    return () => clearInterval(id);
+  }, []);
 
   function follow(id: string) {
     clearInterval(timer.current);
@@ -74,12 +80,12 @@ export function OpenPage() {
         <span className="chip bg-red-soft text-red"><ShieldCheck size={13} />For holders</span>
         <h1 className="mt-5 text-5xl font-bold leading-[.95] tracking-tight sm:text-6xl md:text-7xl">Rip packs.<br /><span className="text-red">Lose less.</span></h1>
         <p className="mt-6 max-w-md text-lg text-muted">Open Collector Crypt packs with protection. When a pull is worth less than the pack, part of the difference lands back in your wallet, automatically.</p>
-        <div className="mt-8 flex flex-wrap gap-3">
+        <div className="mt-8 grid gap-3 sm:flex sm:flex-wrap">
           <a href="#packs" className="btn btn-red h-12 px-6">Open a pack<ArrowDown size={16} /></a>
           <Link href="/claim" className="btn btn-ghost h-12 px-6">Opened one elsewhere?</Link>
         </div>
         <ContractAddress variant="hero" className="mt-6" />
-        <div className="mt-10 flex flex-wrap gap-x-10 gap-y-4">
+        <div className="mt-10 grid grid-cols-3 gap-4 border-t border-line pt-6 sm:flex sm:gap-x-10">
           <HeroStat label="In the pool" value={money(pool?.balanceUsd)} />
           <HeroStat label="Paid back" value={money(pool ? pool.totals.onsiteRebatesUsd + pool.totals.offsiteRebatesUsd : null)} />
           <HeroStat label="Packs protected" value={pool ? String(pool.totals.packsOpened) : '—'} />
@@ -128,20 +134,36 @@ export function OpenPage() {
     </section>}
 
     <section className="pb-8">
-      <SectionTitle title="Live rebates" sub="Every pull that paid out, on-site and off-site." />
-      {activity.length ? <div className="card divide-y divide-line">
-        {activity.map((a, i) => <div key={i} className="flex items-center gap-4 px-5 py-3.5">
+      <SectionTitle title="Live rebates" sub="Every pull that paid out, on-site and off-site." action={<span className="chip bg-grass-soft text-grass"><span className="live-dot" />Live</span>} />
+      {activity.length ? <div className="card divide-y divide-line overflow-hidden">
+        {activity.slice(0, allActivity ? activity.length : 6).map((a, i) => <div key={`${a.at}-${i}`} className="flex items-center gap-4 px-4 py-3.5 sm:px-5">
           <span className="size-2.5 shrink-0 rounded-full" style={{ background: packStyle(a.priceUsd).top }} />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">{a.cardName ? a.cardName.split(' · ').slice(0, 2).join(' · ') : 'Off-site pull'}</div>
             <div className="truncate text-xs text-muted"><span className="num">{a.wallet}</span> · {money(a.priceUsd)} {packStyle(a.priceUsd).name} pack · worth <span className="num">{money(a.valueUsd)}</span></div>
           </div>
           <div className="shrink-0 text-right">
-            <div className={`num text-sm font-semibold ${a.rebateUsd ? 'text-grass' : 'text-ink'}`}>{a.rebateUsd ? `+${money(a.rebateUsd)}` : 'Hit!'}</div>
+            {a.rebateUsd ? <div className="num text-sm font-semibold text-grass">+{money(a.rebateUsd)}</div> : <span className="chip h-5 bg-yellow px-2 text-[11px] text-ink">Hit</span>}
             <div className="text-xs text-faint">{ago(a.at)}</div>
           </div>
         </div>)}
+        {activity.length > 6 && <button className="flex h-11 w-full items-center justify-center gap-1.5 text-sm font-semibold text-muted hover:bg-bg hover:text-ink" onClick={() => setAllActivity(v => !v)}>{allActivity ? 'Show less' : `Show all ${activity.length}`}<ArrowDown size={14} className={allActivity ? 'rotate-180' : ''} /></button>}
       </div> : <div className="card px-5 py-8 text-center text-sm text-muted">No pulls yet. Be the first.</div>}
+    </section>
+
+    {/* Closing call to action */}
+    <section className="pt-8">
+      <div className="relative overflow-hidden rounded-[1.75rem] bg-ink px-6 py-10 text-white sm:px-10 sm:py-12">
+        <div aria-hidden="true" className="absolute -right-20 -top-20 size-72 rounded-full border-[18px] border-white/[.06] sm:-right-10 sm:size-80"><div className="absolute inset-x-0 top-1/2 h-[18px] -translate-y-1/2 bg-white/[.06]" /><div className="absolute left-1/2 top-1/2 size-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-[18px] border-white/[.06]" /></div>
+        <div className="relative max-w-xl">
+          <h2 className="text-3xl font-bold leading-tight tracking-tight sm:text-4xl">Every pack, with a <span className="text-yellow">safety net.</span></h2>
+          <p className="mt-3 text-white/70">Hold the token, open packs here, and get part of every bad pull back in USDC. Drops, big hits and pool updates go out on X first.</p>
+          <div className="mt-7 grid gap-3 sm:flex sm:flex-wrap">
+            <a href="#packs" className="btn btn-red h-12 px-6">Open a pack<ArrowRight size={16} /></a>
+            <a href={X_URL} target="_blank" rel="noreferrer" className="btn h-12 border border-white/20 px-6 text-white hover:border-white"><XLogo size={15} />Follow @{X_HANDLE}</a>
+          </div>
+        </div>
+      </div>
     </section>
 
     <Modal open={opening !== null} onClose={close} dismissable={!order || FINAL.includes(order.status)} width="max-w-2xl" label="Opening your pack">
@@ -151,7 +173,7 @@ export function OpenPage() {
 }
 
 function HeroStat({ label, value }: { label: string; value: string }) {
-  return <div><div className="num text-2xl font-semibold">{value}</div><div className="text-xs text-muted">{label}</div></div>;
+  return <div className="min-w-0"><div className="num truncate text-lg font-semibold sm:text-2xl">{value}</div><div className="text-xs text-muted">{label}</div></div>;
 }
 
 /** A worked example at the visitor's own coverage. */
@@ -159,9 +181,9 @@ function Example({ coverageBps, tierName }: { coverageBps: number; tierName: str
   const price = 25, fee = 2.5, value = 9.3, rebate = Math.floor((price - value) * coverageBps / 100) / 100;
   return <div className="card rise relative p-6 shadow-[0_30px_80px_-40px_rgb(23_23_28/.35)] sm:p-8">
     <div className="label">Example pull</div>
-    <div className="mt-4 grid grid-cols-[110px_1fr] gap-6 sm:grid-cols-[130px_1fr]">
+    <div className="mt-4 grid grid-cols-[104px_1fr] gap-4 sm:grid-cols-[130px_1fr] sm:gap-6">
       <Slab card={{ name: 'Sylveon · Crown Zenith · PSA 9', image: null, insuredValueUsd: value, rarity: 'Common' }} priceUsd={price} />
-      <dl className="grid content-start gap-2.5 text-sm">
+      <dl className="grid min-w-0 content-start gap-2.5 text-[13px] sm:text-sm">
         <Row k="Pack + protection" v={money(price + fee)} />
         <Row k="Card is worth" v={money(value)} />
         <Row k="Shortfall" v={money(price - value)} tone="text-red" />
@@ -173,14 +195,14 @@ function Example({ coverageBps, tierName }: { coverageBps: number; tierName: str
   </div>;
 }
 function Row({ k, v, tone = '', big }: { k: string; v: string; tone?: string; big?: boolean }) {
-  return <div className="flex items-baseline justify-between gap-3"><dt className={big ? 'font-semibold' : 'text-muted'}>{k}</dt><dd className={`num font-semibold ${big ? 'text-2xl text-grass' : tone}`}>{v}</dd></div>;
+  return <div className="flex items-baseline justify-between gap-3"><dt className={`whitespace-nowrap ${big ? 'font-semibold' : 'text-muted'}`}>{k}</dt><dd className={`num font-semibold ${big ? 'text-xl text-grass sm:text-2xl' : tone}`}>{v}</dd></div>;
 }
 
 function PackCard({ pack, signedIn, busy, onOpen }: { pack: Pack; signedIn: boolean; busy: boolean; onOpen: () => void }) {
   const q = pack.quote, blocked = signedIn && !q.protected;
   return <article className="group flex flex-col">
     <PackArt priceUsd={pack.priceUsd} />
-    <div className="mt-4 flex items-baseline justify-between gap-2">
+    <div className="mt-4 flex flex-wrap items-baseline justify-between gap-x-2">
       <span className="num text-lg font-semibold">{money(q.totalMicros / 1e6)}</span>
       <span className="text-xs text-muted">incl. {money(q.feeMicros / 1e6)} fee</span>
     </div>
@@ -200,7 +222,8 @@ function OpenFlow({ priceUsd, order, onAgain, onClose }: { priceUsd: number; ord
   const revealed = !!order?.card;
   const failed = status === 'refunded' || status === 'expired' || status === 'review';
   const hit = !!order && order.valueUsd !== null && order.valueUsd >= order.priceUsd;
-  return <div className="grid gap-8 sm:grid-cols-[200px_1fr]">
+  return <div className="relative grid gap-8 sm:grid-cols-[200px_1fr]">
+    {status === 'complete' && hit && <Confetti />}
     <div className="mx-auto w-[170px] sm:w-[200px]">
       {revealed ? <div className="reveal"><Slab card={order!.card!} priceUsd={priceUsd} /></div> : <PackArt priceUsd={priceUsd} className={status && status !== 'awaiting_payment' ? 'shake' : 'float'} />}
     </div>
@@ -237,6 +260,11 @@ function OpenFlow({ priceUsd, order, onAgain, onClose }: { priceUsd: number; ord
       </div>}
     </div>
   </div>;
+}
+const CONFETTI = ['#e3350d', '#ffcb05', '#2a75bb', '#2f9e4f', '#7b3fe4'];
+function Confetti() {
+  return <div className="confetti" aria-hidden="true">{Array.from({ length: 28 }, (_, i) =>
+    <i key={i} style={{ left: `${(i * 37) % 100}%`, background: CONFETTI[i % CONFETTI.length], animationDelay: `${(i % 7) * 70}ms`, rotate: `${i * 47}deg` }} />)}</div>;
 }
 function Mini({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
   return <div><div className="label">{label}</div><div className={`num mt-1 text-xl font-semibold ${tone}`}>{value}</div></div>;

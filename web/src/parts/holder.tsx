@@ -15,18 +15,23 @@ export function CoverageLadder({ mode = 'onsite' }: { mode?: 'onsite' | 'offsite
       <div>
         <div className="label">Your coverage</div>
         <div className="mt-1 text-xl font-semibold">{!me.wallet ? 'Connect to see your tier' : h?.tier ? `${h.tier.name} tier` : h?.configured === false ? 'Token not launched yet' : 'Not covered yet'}</div>
-        {me.wallet && h?.configured && <p className="mt-1 text-sm text-muted">You hold <span className="num text-ink">{share(ppm)}</span> of supply{next ? <>. <span className="num text-ink">{share(next.minSupplyPpm - ppm)}</span> more reaches {next.name}.</> : '. That is the top tier.'}</p>}
+        {me.wallet && h?.configured && next && <div className="mt-3 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-line" role="progressbar" aria-label={`Progress to ${next.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, ppm / next.minSupplyPpm) * 100)}><div className="h-full rounded-full bg-yellow" style={{ width: `${Math.min(100, ppm / next.minSupplyPpm * 100)}%` }} /></div>}
+        {me.wallet && h?.configured && <p className="mt-2 text-sm text-muted">You hold <span className="num text-ink">{share(ppm)}</span> of supply{next ? <>. <span className="num text-ink">{share(next.minSupplyPpm - ppm)}</span> more reaches {next.name}.</> : '. That is the top tier.'}</p>}
       </div>
       {!me.wallet && <button className="btn btn-ink btn-sm" onClick={connect}>Connect wallet</button>}
     </div>
     <div className="mt-5 grid gap-2 sm:grid-cols-3">
       {tiers.map(t => {
         const active = t.id === current;
-        return <div key={t.id} className={`rounded-2xl border p-4 transition ${active ? 'border-ink bg-ink text-white' : 'border-line'}`}>
-          <div className="flex items-center justify-between"><span className="font-semibold">{t.name}</span>{active && <span className="chip bg-white/15 text-white"><Check size={12} />You</span>}</div>
-          <div className={`num mt-0.5 text-xs ${active ? 'text-white/60' : 'text-muted'}`}>hold {share(t.minSupplyPpm)}+</div>
-          <div className="num mt-3 text-2xl font-semibold">{pct(mode === 'onsite' ? t.onsiteCoverageBps : t.offsiteCoverageBps)}</div>
-          <div className={`text-xs ${active ? 'text-white/60' : 'text-muted'}`}>{mode === 'onsite' ? 'back on bad pulls here' : 'back on off-site pulls'}</div>
+        return <div key={t.id} className={`flex items-center justify-between gap-4 rounded-2xl border p-4 transition sm:block ${active ? 'border-ink bg-ink text-white' : 'border-line'}`}>
+          <div className="min-w-0">
+            <div className="flex items-center justify-between gap-2"><span className="font-semibold">{t.name}</span>{active && <span className="chip bg-white/15 text-white"><Check size={12} />You</span>}</div>
+            <div className={`num mt-0.5 text-xs ${active ? 'text-white/60' : 'text-muted'}`}>hold {share(t.minSupplyPpm)}+</div>
+          </div>
+          <div className="shrink-0 text-right sm:mt-3 sm:text-left">
+            <div className="num text-2xl font-semibold">{pct(mode === 'onsite' ? t.onsiteCoverageBps : t.offsiteCoverageBps)}</div>
+            <div className={`text-xs ${active ? 'text-white/60' : 'text-muted'}`}>{mode === 'onsite' ? 'back on bad pulls here' : 'back on off-site pulls'}</div>
+          </div>
         </div>;
       })}
     </div>
