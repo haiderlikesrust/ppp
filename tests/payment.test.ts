@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ComputeBudgetProgram, Keypair, SystemProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
-import { buildPayment, validateSignedPayment } from '../server/payment';
+import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
+import { LIGHTHOUSE_PROGRAM, buildPayment, validateSignedPayment } from '../server/payment';
 
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 function fixture(micros = 27_500_000) {
@@ -49,4 +49,12 @@ test('a payment re-signed against a different blockhash is rejected', () => {
   // Orders created before the pin was added carry no blockhash and still validate.
   const { blockhash: _, ...legacy } = f.built.intent;
   validateSignedPayment(f.sign(later), legacy);
+});
+
+test('Lighthouse balance guards added by Phantom are accepted', () => {
+  const f = fixture();
+  const message = TransactionMessage.decompile(f.tx.message);
+  const guard = new TransactionInstruction({ programId: new PublicKey(LIGHTHOUSE_PROGRAM), keys: [{ pubkey: f.user.publicKey, isSigner: false, isWritable: false }], data: Buffer.from([1, 2, 3]) });
+  const guarded = new VersionedTransaction(new TransactionMessage({ ...message, instructions: [...message.instructions, guard] }).compileToV0Message());
+  validateSignedPayment(f.sign(guarded), f.built.intent);
 });

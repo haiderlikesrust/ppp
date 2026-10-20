@@ -5,7 +5,7 @@ import { ReviewRequired } from './jobs';
 
 export const MEMO_PROGRAM = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 /** Wallets such as Phantom may append Lighthouse balance assertions; they only constrain the signer. */
-const LIGHTHOUSE_PROGRAM = 'L2TExMFKdjpN9kozasaurPtRTUv8KHGp8yjfxEbaHn9';
+export const LIGHTHOUSE_PROGRAM = 'L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95';
 
 /** `blockhash` pins the payment to the one the server issued, so it can't land after the order expired. Older orders lack it. */
 export type PaymentIntent = { user: string; recipient: string; usdcMint: string; micros: number; memo: string; reference: string; blockhash?: string };
