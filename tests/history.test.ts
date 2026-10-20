@@ -16,6 +16,15 @@ test('recognizes a pack payment made by the wallet itself', () => {
   assert.equal(parseCcPayment(tx([memoIx(), { program: 'spl-token', parsed: { type: 'transfer', info: { source: userAta, destination: ccAta, authority: wallet, amount: '50000000' } } }]), wallet, userAta, ccAta)?.priceMicros, 50_000_000);
 });
 
+test('packs opened through other apps that sell Collector Crypt packs are recognized too', () => {
+  for (const app of ['jupiter', '6hjcq', 'slabz']) {
+    const other = `${app}-d2a58146-0b78-44b2-a318-6e1e3558c9a0`;
+    assert.equal(parseCcPayment(tx([memoIx(`${other}:open`), transfer()]), wallet, userAta, ccAta)?.memo, other, app);
+  }
+  assert.equal(parseCcPayment(tx([memoIx('jupiter-d2a58146-0b78-44b2-a318-6e1e3558c9a0:buyback'), transfer()]), wallet, userAta, ccAta), null, 'a sell-back is not a pack');
+  assert.equal(parseCcPayment(tx([memoIx('Jupiter Exchange-d2a58146-0b78-44b2-a318-6e1e3558c9a0:open'), transfer()]), wallet, userAta, ccAta), null, 'app tags are short lowercase words');
+});
+
 test('ignores payments by someone else, failed transactions and look-alikes', () => {
   assert.equal(parseCcPayment(tx([memoIx(), transfer({ authority: 'Someone' })]), wallet, userAta, ccAta), null, 'another authority');
   assert.equal(parseCcPayment(tx([memoIx(), transfer({ source: 'OtherAta' })]), wallet, userAta, ccAta), null, 'another source');

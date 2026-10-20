@@ -2,11 +2,16 @@ import type { ParsedTransactionWithMeta } from '@solana/web3.js';
 import { packDef } from '../../shared/packs';
 import type { CcPayment } from '../ports';
 
-export const CC_OPEN_MEMO = /^(cc-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}):open$/;
+/**
+ * A Collector Crypt pack-open memo. Apps that sell Collector Crypt packs (its own site, Jupiter, pump.fun,
+ * Solflare…) pay the same machines into the same account and tag the memo with their own prefix:
+ * `cc-<uuid>:open`, `jupiter-<uuid>:open`, `6hjcq-<uuid>:open`.
+ */
+export const CC_OPEN_MEMO = /^([a-z0-9]{2,16}-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}):open$/;
 
 /**
  * Recognizes a Collector Crypt pack payment made by `wallet` itself:
- * exactly one `cc-<uuid>:open` memo and exactly one USDC transfer from the
+ * exactly one `<app>-<uuid>:open` memo and exactly one USDC transfer from the
  * wallet's own token account, authorized by the wallet, into Collector Crypt's
  * payment account. Anything else (someone else paying, a secondary sale) is ignored.
  */

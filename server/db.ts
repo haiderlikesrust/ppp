@@ -92,6 +92,9 @@ export async function migrate(db: Database) {
     `ALTER TABLE wallets ADD COLUMN IF NOT EXISTS last_seen_at BIGINT`,
     `UPDATE wallets SET last_seen_at=activated_at WHERE last_seen_at IS NULL`,
     `CREATE INDEX IF NOT EXISTS snapshots_time ON snapshots(taken_at)`,
+    // Collector Crypt's public pull feed, for pack stats: the latest pulls of each machine, plus the card of big hits.
+    `CREATE TABLE IF NOT EXISTS cc_pulls (id TEXT PRIMARY KEY, code TEXT NOT NULL, value_cents INTEGER NOT NULL, pulled_at BIGINT NOT NULL, card JSONB)`,
+    `CREATE INDEX IF NOT EXISTS cc_pulls_recent ON cc_pulls(code, pulled_at DESC)`,
   ];
   for (const statement of statements) await db.query(statement);
 }

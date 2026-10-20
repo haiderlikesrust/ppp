@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type Ref } from 'react';
-import { BookOpen, FlaskConical, LogOut, Package, ScanSearch, Settings2, Vault, Wallet as WalletIcon, type LucideIcon } from 'lucide-react';
+import { BarChart3, BookOpen, FlaskConical, LogOut, Package, ScanSearch, Settings2, Vault, Wallet as WalletIcon, type LucideIcon } from 'lucide-react';
 import type { HolderView, PoolView } from '../../shared/types';
-import { api, money, short } from './api';
+import { api, short } from './api';
 import { forget, onAccountSwitch, signIn, useWallets } from './wallet';
 import { Logo, Modal, Toast, Wordmark } from './ui';
 import { OpenPage } from './pages/open';
@@ -9,6 +9,7 @@ import { ClaimPage } from './pages/claim';
 import { PoolPage } from './pages/pool';
 import { AdminPage } from './pages/admin';
 import { DocsPage } from './pages/docs';
+import { StatsPage } from './pages/stats';
 import { PracticeDrawer } from './parts/practice';
 import { ContractAddress } from './parts/contract';
 import { XLink } from './parts/social';
@@ -20,13 +21,13 @@ const AppContext = createContext<Ctx>(null as any);
 export const useApp = () => useContext(AppContext);
 
 export function navigate(path: string) { history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')); scrollTo({ top: 0 }); }
-export function Link({ href, className, children, ref }: { href: string; className?: string; children: React.ReactNode; ref?: Ref<HTMLAnchorElement> }) {
-  return <a ref={ref} href={href} className={className} onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(href); }}>{children}</a>;
+export function Link({ href, className, children, ref, current, title }: { href: string; className?: string; children: React.ReactNode; ref?: Ref<HTMLAnchorElement>; current?: boolean; title?: string }) {
+  return <a ref={ref} href={href} title={title} className={className} aria-current={current ? 'page' : undefined} onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(href); }}>{children}</a>;
 }
 
 type NavItem = [href: string, label: string, icon: LucideIcon];
 
-const TITLES: Record<string, string> = { '/claim': 'Claim', '/pool': 'Vault', '/how-it-works': 'How it works', '/docs': 'How it works', '/admin': 'Admin' };
+const TITLES: Record<string, string> = { '/claim': 'Claim', '/stats': 'Stats', '/pool': 'Vault', '/how-it-works': 'How it works', '/docs': 'How it works', '/admin': 'Admin' };
 
 export function App() {
   const [path, setPath] = useState(location.pathname);
@@ -67,32 +68,35 @@ export function App() {
     catch (e) { notify((e as Error).message); } finally { setBusy(false); }
   }
 
-  const nav: NavItem[] = [['/', 'Packs', Package], ['/claim', 'Claim', ScanSearch], ['/pool', 'Vault', Vault], ['/how-it-works', 'How it works', BookOpen], ...(me.owner ? [['/admin', 'Admin', Settings2] as NavItem] : [])];
+  const nav: NavItem[] = [['/', 'Packs', Package], ['/claim', 'Claim', ScanSearch], ['/stats', 'Stats', BarChart3], ['/pool', 'Vault', Vault], ['/how-it-works', 'How it works', BookOpen], ...(me.owner ? [['/admin', 'Admin', Settings2] as NavItem] : [])];
   const active = path === '/docs' ? '/how-it-works' : nav.some(([href]) => href === path) ? path : '/';
-  const page = path === '/claim' ? <ClaimPage /> : path === '/pool' ? <PoolPage /> : path === '/how-it-works' || path === '/docs' ? <DocsPage /> : path === '/admin' ? <AdminPage /> : <OpenPage />;
+  const page = path === '/claim' ? <ClaimPage /> : path === '/stats' ? <StatsPage /> : path === '/pool' ? <PoolPage /> : path === '/how-it-works' || path === '/docs' ? <DocsPage /> : path === '/admin' ? <AdminPage /> : <OpenPage />;
   const tier = me.holder?.tier;
   const practice = config?.mode === 'practice';
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => { const on = () => setScrolled(window.scrollY > 8); on(); window.addEventListener('scroll', on, { passive: true }); return () => window.removeEventListener('scroll', on); }, []);
 
   return <AppContext.Provider value={{ me, config, refresh, connect: () => setPicker(true), notify, version, bump: () => setVersion(v => v + 1) }}>
-    <header data-app-chrome className="sticky top-0 z-40 bg-bg/90 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
-        <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="Pullback home"><Logo size={26} /><span className="hidden min-[400px]:inline"><Wordmark size="text-base" /></span></Link>
-        <div className="ml-auto flex min-w-0 items-center gap-2">
-          {practice && <span className="tag hidden bg-volt-soft text-volt md:inline-flex"><FlaskConical size={12} />Practice</span>}
-          <ContractAddress variant="chip" className="hidden xl:flex" />
+    {/* One floating bar: the brand, the pages (desktop) and the wallet. It firms up once the page scrolls. */}
+    <header data-app-chrome className="sticky top-0 z-40 px-2 pt-2 sm:px-4 sm:pt-3">
+      <div className={`mx-auto flex h-14 max-w-6xl items-center gap-3 rounded-2xl border pl-3 pr-2 backdrop-blur-md transition-[background-color,border-color,box-shadow] duration-300 lg:h-16 lg:gap-4 lg:pl-4 ${scrolled ? 'border-line bg-surface/90 shadow-[0_18px_40px_-22px_rgb(0_0_0/0.95)]' : 'border-line/60 bg-surface/55'}`}>
+        <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="Pullback home"><Logo size={28} /><span className="hidden min-[360px]:inline lg:hidden xl:inline"><Wordmark size="text-base" /></span></Link>
+        {practice && <span className="tag hidden bg-volt-soft text-volt sm:inline-flex lg:hidden"><FlaskConical size={12} />Practice</span>}
+        <DockNav items={nav} active={active} />
+        <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 lg:ml-0">
           <XLink variant="icon" className="hidden sm:grid" />
           {me.wallet
-            ? <span className="pixel num flex h-9 min-w-0 items-center gap-2 whitespace-nowrap rounded-md border border-line bg-surface px-3 text-xs" title={`${me.wallet}${tier ? ` · ${tier.name}` : ''}`}><i className={`size-2 shrink-0 ${tier ? 'bg-gain' : 'bg-faint'}`} />{short(me.wallet)}{tier && <span className="hidden text-muted sm:inline">· {tier.name}</span>}</span>
-            : <button className="btn btn-primary btn-sm" onClick={() => setPicker(true)}><WalletIcon size={15} />Connect</button>}
-          {me.wallet && <button className="grid size-9 shrink-0 place-items-center rounded-md text-muted hover:bg-raised hover:text-ink" onClick={() => logout()} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>}
+            ? <span className="pixel num flex h-10 min-w-0 items-center gap-2 whitespace-nowrap rounded-lg border border-line bg-bg/70 px-3 text-xs" title={`${me.wallet}${tier ? ` · ${tier.name}` : ''}`}><i className={`size-2 shrink-0 ${tier ? 'bg-gain' : 'bg-faint'}`} />{short(me.wallet)}{tier && <span className="hidden text-muted sm:inline lg:hidden">· {tier.name}</span>}</span>
+            : <button className="btn btn-primary btn-sm h-10" onClick={() => setPicker(true)}><WalletIcon size={15} />Connect</button>}
+          {me.wallet && <button className="grid size-10 shrink-0 place-items-center rounded-lg text-muted hover:bg-raised hover:text-ink" onClick={() => logout()} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>}
         </div>
       </div>
-      <NavStrip items={nav} active={active} />
     </header>
+    <TabBar items={nav} active={active} />
 
     <main data-app-chrome className="mx-auto max-w-6xl px-4 pb-24 sm:px-6">{page}</main>
 
-    <footer data-app-chrome className="border-t border-line">
+    <footer data-app-chrome className="mt-8 border-t border-line pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0">
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm sm:px-6 md:grid-cols-[1.2fr_1fr_1.6fr]">
         <div className="min-w-0">
           <Link href="/" className="flex items-center gap-2.5"><Logo size={24} /><Wordmark size="text-base" /></Link>
@@ -130,38 +134,56 @@ export function App() {
   </AppContext.Provider>;
 }
 
-/**
- * The navigation strip: numbered sections, an accent block with stepped pixel corners that slides to
- * the active one, and a live vault readout. On phones it becomes an evenly split bar of icons that always fits.
- */
-function NavStrip({ items, active }: { items: NavItem[]; active: string }) {
-  const { version } = useApp();
+/** Measures the active link so the accent block can slide to it. Hidden navs measure as nothing. */
+function useSlider(active: string, count: number) {
   const links = useRef<Record<string, HTMLAnchorElement | null>>({});
   const [box, setBox] = useState<{ left: number; width: number } | null>(null);
-  const [pool, setPool] = useState<number | null>(null);
   useLayoutEffect(() => {
-    const measure = () => { const el = links.current[active]; setBox(el ? { left: el.offsetLeft, width: el.offsetWidth } : null); };
+    const measure = () => { const el = links.current[active]; setBox(el && el.offsetWidth ? { left: el.offsetLeft, width: el.offsetWidth } : null); };
     measure();
     document.fonts?.ready.then(measure);
     window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure);
-  }, [active, items.length]);
+  }, [active, count]);
+  return { links, box };
+}
+
+const compactUsd = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: n < 1_000 ? 0 : 1 }).format(n);
+
+/** Desktop: the pages as one segmented pill, the accent block sliding between them, the vault's live balance on its tab. */
+function DockNav({ items, active }: { items: NavItem[]; active: string }) {
+  const { version } = useApp();
+  const { links, box } = useSlider(active, items.length);
+  const [vault, setVault] = useState<number | null>(null);
   useEffect(() => {
-    const load = () => { if (!document.hidden) api<PoolView>('/pool').then(p => setPool(p.balanceUsd)).catch(() => {}); };
-    load(); const id = setInterval(load, 30_000); return () => clearInterval(id);
+    const load = () => api<PoolView>('/pool').then(p => setVault(p.balanceUsd)).catch(() => {});
+    load(); const id = setInterval(() => { if (!document.hidden) load(); }, 30_000); return () => clearInterval(id);
   }, [version]);
-  return <nav aria-label="Main" className="border-y border-line bg-surface/80">
-    <div className="relative mx-auto grid max-w-6xl px-1.5 md:flex md:items-stretch md:px-4" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
-      {box && <span aria-hidden="true" className="nav-block absolute bottom-1 top-1 bg-volt md:bottom-1.5 md:top-1.5" style={{ left: box.left, width: box.width }} />}
-      {items.map(([href, label, Icon], i) => {
+  return <nav aria-label="Main" className="mx-auto hidden lg:block">
+    <div className="relative flex items-center gap-0.5 rounded-xl border border-line bg-bg/70 p-1">
+      {box && <span aria-hidden="true" className="nav-block absolute bottom-1 top-1 bg-volt" style={{ left: box.left, width: box.width }} />}
+      {items.map(([href, label, Icon]) => {
         const on = href === active;
-        return <Link key={href} href={href} ref={el => { links.current[href] = el; }} className={`pixel relative z-[1] flex h-14 min-w-0 flex-col items-center justify-center gap-1 px-1 text-center text-[9px] uppercase leading-tight transition-colors md:h-11 md:shrink-0 md:flex-row md:gap-2 md:whitespace-nowrap md:px-4 md:text-[13px] ${on ? 'text-night' : 'text-muted hover:text-ink'}`}>
-          <Icon size={16} className="md:hidden" aria-hidden="true" />
-          <span className={`hidden text-[10px] md:inline ${on ? 'text-night/55' : 'text-faint'}`}>{String(i + 1).padStart(2, '0')}</span>{label}
+        return <Link key={href} href={href} current={on} ref={el => { links.current[href] = el; }} title={href === '/admin' ? label : undefined} className={`pixel relative z-[1] flex h-10 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs uppercase transition-colors ${on ? 'text-night' : 'text-muted hover:bg-raised hover:text-ink'}`}>
+          <Icon size={15} aria-hidden="true" />{href === '/admin' ? <span className="sr-only">{label}</span> : label}
+          {href === '/pool' && vault !== null && <span className={`num hidden rounded-[3px] px-1.5 py-0.5 text-[10px] xl:inline ${on ? 'bg-night/15 text-night' : 'bg-gain-soft text-gain'}`} title="In the vault now">{compactUsd(vault)}</span>}
         </Link>;
       })}
-      <div className="ml-auto hidden shrink-0 items-center gap-2.5 pl-6 pr-2 md:flex">
-        <i className="live-dot" /><span className="label">Vault</span><span className="pixel num text-sm text-gain">{money(pool)}</span>
-      </div>
+    </div>
+  </nav>;
+}
+
+/** Phones and tablets: a tab bar fixed to the bottom, in thumb reach, with the same sliding block. */
+function TabBar({ items, active }: { items: NavItem[]; active: string }) {
+  const { links, box } = useSlider(active, items.length);
+  return <nav aria-label="Main" data-app-chrome className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
+    <div className="relative mx-auto grid max-w-xl px-1.5" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+      {box && <span aria-hidden="true" className="nav-block absolute bottom-1.5 top-1.5 bg-volt" style={{ left: box.left, width: box.width }} />}
+      {items.map(([href, label, Icon]) => {
+        const on = href === active;
+        return <Link key={href} href={href} current={on} ref={el => { links.current[href] = el; }} className={`pixel relative z-[1] flex h-16 min-w-0 flex-col items-center justify-start gap-1.5 px-0.5 pt-3 text-center text-[9px] uppercase leading-[11px] transition-colors ${on ? 'text-night' : 'text-muted hover:text-ink'}`}>
+          <Icon size={19} aria-hidden="true" /><span className="max-w-full">{label}</span>
+        </Link>;
+      })}
     </div>
   </nav>;
 }

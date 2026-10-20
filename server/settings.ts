@@ -32,6 +32,13 @@ export const settingsSchema: z.ZodType<Settings> = z.object({
   if (s.gas.poolMinSol < s.gasReserveSol) ctx.addIssue({ code: 'custom', path: ['gas', 'poolMinSol'], message: 'POOL minimum must be at least the gas reserve.' });
 });
 
+/**
+ * Bumped when a change of rules moves some settings. Rules 2: off-site claims check the coin's on-chain
+ * history, so the 24h claim window becomes 48h and holding before the pull is no longer required.
+ * Rules 3: off-site claims are unlimited (no per-wallet daily or weekly limits).
+ */
+const RULES = 3;
+
 /** Earlier default tier names, renamed on load. Names an owner typed themselves are left alone. */
 const RENAMED_TIERS: Record<string, string> = { Holder: 'Shrimp', Trainer: 'Shrimp', Collector: 'Dolphin', 'Gym Leader': 'Dolphin', Champion: 'Whale' };
 
@@ -46,12 +53,19 @@ export class SettingsStore {
       ...(row && !row.data.pausedPacks && Array.isArray(row.data.pausedPrices) ? { pausedPacks: row.data.pausedPrices.map((p: number) => `pokemon_${p}`) } : {}),
       ...(row && Array.isArray(row.data.tiers) ? { tiers: row.data.tiers.map((t: any) => RENAMED_TIERS[t?.name] ? { ...t, name: RENAMED_TIERS[t.name] } : t) } : {}),
     };
-    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, ...legacy, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker }, gas: { ...DEFAULT_SETTINGS.gas, ...row.data.gas } }) : DEFAULT_SETTINGS;
+    const before2 = row && (row.data.rules ?? 1) < 2;
+    const moved = before2 && row.data.offsiteHoldHours === 24 ? { offsiteHoldHours: 0 } : {};
+    const before3 = row && (row.data.rules ?? 1) < 3;
+    const movedOffsite = {
+      ...(before2 && row.data.offsite?.claimWindowHours === 24 ? { claimWindowHours: 48 } : {}),
+      ...(before3 ? { perWalletDailyClaims: 0, perWalletDailyUsd: 0, perWalletWeeklyUsd: 0 } : {}),
+    };
+    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, ...legacy, ...moved, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite, ...movedOffsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker }, gas: { ...DEFAULT_SETTINGS.gas, ...row.data.gas } }) : DEFAULT_SETTINGS;
     return this.current;
   }
   async save(settings: Settings) {
     const parsed = settingsSchema.parse(settings);
-    await this.db.query('INSERT INTO settings(id,data) VALUES(1,$1) ON CONFLICT(id) DO UPDATE SET data=EXCLUDED.data', [JSON.stringify(parsed)]);
+    await this.db.query('INSERT INTO settings(id,data) VALUES(1,$1) ON CONFLICT(id) DO UPDATE SET data=EXCLUDED.data', [JSON.stringify({ ...parsed, rules: RULES })]);
     this.current = parsed;
   }
 }

@@ -16,6 +16,7 @@ import { Orders } from './orders';
 import { Claims } from './claims';
 import { Treasury } from './treasury';
 import { Gas } from './gas';
+import { PullFeed } from './pull-feed';
 import type { PackProvider, Solana } from './ports';
 
 export type Services = Awaited<ReturnType<typeof createServices>>;
@@ -32,7 +33,7 @@ function signer(name: 'OPS_PRIVATE_KEY' | 'POOL_PRIVATE_KEY') {
 export const practiceAllowed = () => !config.live && !config.SOLANA_RPC_URL && process.env.NODE_ENV !== 'production';
 
 /** Wires the app: practice mode locally, live adapters otherwise (signing only when MAINNET_ENABLED=true). */
-export async function createServices(options: { db?: Database; solana?: Solana; packs?: PackProvider } = {}) {
+export async function createServices(options: { db?: Database; solana?: Solana; packs?: PackProvider; fetcher?: typeof fetch } = {}) {
   const db = options.db ?? await openDatabase();
   await migrate(db);
   const jobs = new Jobs(db), settings = new SettingsStore(db);
@@ -54,7 +55,8 @@ export async function createServices(options: { db?: Database; solana?: Solana; 
   const orders = new Orders(db, jobs, solana, packs, holders, pool, settings, gas);
   const claims = new Claims(db, solana, packs, holders, pool, settings);
   const treasury = new Treasury(db, jobs, solana, pool, settings);
-  return { db, jobs, settings, solana, packs, holders, pool, gas, orders, claims, treasury, serial: new Serial(), practice: solana instanceof MockSolana };
+  const feed = new PullFeed(db, settings, () => solana.opsAddress, options.fetcher);
+  return { db, jobs, settings, solana, packs, holders, pool, gas, orders, claims, treasury, feed, serial: new Serial(), practice: solana instanceof MockSolana };
 }
 
 /** Background loops. Every financial step runs through the one Serial queue. */
@@ -79,6 +81,9 @@ export function startCoordinator(s: Services, log: (message: string, error?: unk
   }, false);
   // One balance check per wallet; a top-up only when OPS runs low.
   every(30_000, 'gas', () => s.gas.ensure());
+  // Collector Crypt's public pull feed, for pack stats and the live feed. Read-only, so outside the queue.
+  void s.feed.poll().catch(error => log('pull-feed failed', error));
+  every(2 * 60_000, 'pull-feed', () => s.feed.poll(), false);
   every(5 * 60_000, 'cleanup', async () => { await s.db.query('DELETE FROM sessions WHERE expires_at<$1', [Date.now()]); await s.db.query('DELETE FROM challenges WHERE expires_at<$1', [Date.now()]); });
   return () => timers.forEach(clearInterval);
 }

@@ -75,14 +75,14 @@ export function AdminPage() {
     <Section title="Off-site claims and limits">
       <div className="grid gap-4 sm:grid-cols-4">
         <Field label="Claims"><Toggle checked={form.offsite.enabled} onChange={v => set('offsite', { ...form.offsite, enabled: v })} label="Enabled" /></Field>
-        <Field label="Claim window, hours" hint="24 = pulls from the last day"><input className="input num" type="number" value={form.offsite.claimWindowHours} onChange={e => set('offsite', { ...form.offsite, claimWindowHours: n(e.target.value) })} /></Field>
+        <Field label="Claim window, hours" hint="48 = pulls from the last two days"><input className="input num" type="number" value={form.offsite.claimWindowHours} onChange={e => set('offsite', { ...form.offsite, claimWindowHours: n(e.target.value) })} /></Field>
         <Field label="Claims / wallet / day" hint="0 = no limit"><input className="input num" type="number" value={form.offsite.perWalletDailyClaims} onChange={e => set('offsite', { ...form.offsite, perWalletDailyClaims: n(e.target.value) })} /></Field>
         <Field label="Paid / wallet / day $" hint="0 = no limit"><input className="input num" type="number" value={form.offsite.perWalletDailyUsd} onChange={e => set('offsite', { ...form.offsite, perWalletDailyUsd: n(e.target.value) })} /></Field>
         <Field label="Paid / wallet / week $" hint="0 = no limit"><input className="input num" type="number" value={form.offsite.perWalletWeeklyUsd} onChange={e => set('offsite', { ...form.offsite, perWalletWeeklyUsd: n(e.target.value) })} /></Field>
         <Field label="Coverage delay, hours" hint="After first connect. 0 = right away"><input className="input num" type="number" value={form.offsiteActivationHours} onChange={e => set('offsiteActivationHours', n(e.target.value))} /></Field>
         <Field label="Pool paid / day, %" hint="All wallets. 0 = no limit"><input className="input num" type="number" step="0.5" value={form.offsite.dailyPoolBps / 100} onChange={e => set('offsite', { ...form.offsite, dailyPoolBps: Math.round(n(e.target.value) * 100) })} /></Field>
         <Field label="Reserve target $" hint="Off-site coverage shrinks below this"><input className="input num" type="number" value={form.offsite.targetReserveUsd} onChange={e => set('offsite', { ...form.offsite, targetReserveUsd: n(e.target.value) })} /></Field>
-        <Field label="Off-site hold, hours"><input className="input num" type="number" value={form.offsiteHoldHours} onChange={e => set('offsiteHoldHours', n(e.target.value))} /></Field>
+        <Field label="Off-site hold, hours" hint="Held before the pull. 0 = owning it at the pull is enough"><input className="input num" type="number" value={form.offsiteHoldHours} onChange={e => set('offsiteHoldHours', n(e.target.value))} /></Field>
         <Field label="On-site hold, hours"><input className="input num" type="number" value={form.onsiteHoldHours} onChange={e => set('onsiteHoldHours', n(e.target.value))} /></Field>
         <Field label="Breaker: max loss ratio %"><input className="input num" type="number" value={form.breaker.lossRatioBps / 100} onChange={e => set('breaker', { ...form.breaker, lossRatioBps: Math.round(n(e.target.value) * 100) })} /></Field>
       </div>

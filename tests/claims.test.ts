@@ -70,7 +70,7 @@ test('the daily claim limit blocks extra claims until the 24h window rolls', asy
 });
 
 test('the daily payout cap queues the rest, and no single rebate exceeds it', async () => {
-  const s = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, perWalletDailyUsd: 3, perWalletDailyClaims: 0 } });
+  const s = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, perWalletDailyUsd: 3, perWalletWeeklyUsd: 100, perWalletDailyClaims: 0 } });
   const { wallet, activatedAt } = await user(s, 20_000, 0);
   const pulls = [losingPull(s, wallet), losingPull(s, wallet)];
   // Big losses, so each rebate hits the $3 cap whatever random values the cards got.
@@ -151,11 +151,44 @@ test('there is no pool-wide daily cap by default; if the owner sets one, claims 
   await capped.db.close();
 });
 
-test('off-site pulls can be claimed for 24 hours by default', async () => {
+test('off-site pulls can be claimed for 48 hours by default', async () => {
   const s = await setup(), { wallet, activatedAt } = await user(s, 10_000, 48);
-  const fresh = losingPull(s, wallet, 23), stale = losingPull(s, wallet, 25);
+  const fresh = losingPull(s, wallet, 47), stale = losingPull(s, wallet, 49);
   const candidates = await s.claims.scan(wallet, activatedAt);
-  assert.ok(candidates.some(c => c.memo === fresh.memo && c.eligible), 'a pull from 23 hours ago is claimable');
-  assert.ok(!candidates.some(c => c.memo === stale.memo), 'a pull from 25 hours ago is outside the window');
+  assert.ok(candidates.some(c => c.memo === fresh.memo && c.eligible), 'a pull from 47 hours ago is claimable');
+  assert.ok(!candidates.some(c => c.memo === stale.memo), 'a pull from 49 hours ago is outside the window');
+  await s.db.close();
+});
+
+test('only packs opened after the wallet bought the coin can be claimed', async () => {
+  const s = await setup(), { wallet, activatedAt } = await user(s, 10_000, 0);
+  const bought = Date.now() - 5 * HOUR;
+  s.solana.boughtAt(wallet, bought);
+  const before = losingPull(s, wallet, 8), after = losingPull(s, wallet, 2);
+  const candidates = await s.claims.scan(wallet, activatedAt);
+  const of = (memo: string) => candidates.find(c => c.memo === memo)!;
+  assert.equal(of(after.memo).eligible, true, of(after.memo).reason ?? '');
+  assert.equal(of(before.memo).eligible, false);
+  assert.match(of(before.memo).reason!, /first bought the coin 3h after this pack was opened/);
+  await assert.rejects(s.claims.claim(wallet, activatedAt, before.memo), /after you bought in/);
+  await s.claims.claim(wallet, activatedAt, after.memo);
+  assert.deepEqual(await s.claims.holding(wallet), { firstAt: bought, complete: true, holds: true }, 'the Claim page shows when the wallet bought in');
+  await s.db.close();
+});
+
+test('a wallet with no coin at the pull, or that sold down since, is not covered', async () => {
+  const s = await setup(), seller = await user(s, 10_000, 0);
+  const sold = losingPull(s, seller.wallet, 6);
+  s.solana.setHolderPpm(seller.wallet, 500, Date.now() - 3 * HOUR);   // sold below Shrimp after the pull
+  s.solana.setHolderPpm(seller.wallet, 10_000);                       // and bought back
+  s.claims.forget(seller.wallet);
+  assert.match((await s.claims.scan(seller.wallet, seller.activatedAt)).find(c => c.memo === sold.memo)!.reason!, /lowest balance since this pull/);
+
+  const flat = await user(s, 10_000, 0);
+  s.solana.setHolderPpm(flat.wallet, 0, Date.now() - 10 * HOUR);     // sold out before the pull
+  s.solana.setHolderPpm(flat.wallet, 10_000);                         // bought again after it
+  const p = losingPull(s, flat.wallet, 4);
+  s.claims.forget(flat.wallet);
+  assert.match((await s.claims.scan(flat.wallet, flat.activatedAt)).find(c => c.memo === p.memo)!.reason!, /held none of the coin when this pack was opened/);
   await s.db.close();
 });

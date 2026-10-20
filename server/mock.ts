@@ -33,10 +33,31 @@ export class MockSolana implements Solana {
   defaultHolderPpm = 10_000;
 
   constructor() { this.usdc.set(this.poolAddress, 10_000_000_000n); }
-  async holderBalance(owner: string) { return this.holders.get(owner) ?? this.supply * BigInt(this.defaultHolderPpm) / 1_000_000n; }
+  /** Coin balance changes per wallet, oldest first. A wallet nobody set has held the default since `defaultHeldSince`. */
+  readonly holdings = new Map<string, { at: number; balance: bigint }[]>();
+  defaultHeldSince = Date.now() - 30 * 86_400_000;
+  private defaultBalance() { return this.supply * BigInt(this.defaultHolderPpm) / 1_000_000n; }
+  async holderBalance(owner: string) { return this.holders.get(owner) ?? this.defaultBalance(); }
+  async holderHistory(owner: string, sinceMs: number) {
+    const all = this.holdings.get(owner) ?? [{ at: this.defaultHeldSince, balance: this.defaultBalance() }];
+    const prior = all.filter(c => c.at < sinceMs).at(-1);
+    return { changes: [...(prior ? [prior] : []), ...all.filter(c => c.at >= sinceMs)], current: await this.holderBalance(owner), firstAt: all.find(c => c.balance > 0n)?.at ?? null, complete: true };
+  }
   async holderSupply() { return this.supply; }
   async usdcBalance(owner: string) { return this.usdc.get(owner) ?? 0n; }
-  setHolderPpm(owner: string, ppm: number) { this.holders.set(owner, this.supply * BigInt(ppm) / 1_000_000n); }
+  /** Sets a wallet's balance as of `at` (now by default), as if it bought or sold then. */
+  setHolderPpm(owner: string, ppm: number, at = Date.now()) {
+    const balance = this.supply * BigInt(ppm) / 1_000_000n;
+    const list = this.holdings.get(owner) ?? (this.holders.has(owner) ? [] : [{ at: this.defaultHeldSince, balance: this.defaultBalance() }]);
+    this.holdings.set(owner, [...list.filter(c => c.at < at), { at, balance }].sort((a, b) => a.at - b.at));
+    this.holders.set(owner, this.holdings.get(owner)!.at(-1)!.balance);
+  }
+  /** Starts a wallet's coin history fresh: it first bought its current balance at `at`. */
+  boughtAt(owner: string, at: number) {
+    const balance = this.holders.get(owner) ?? this.defaultBalance();
+    this.holdings.set(owner, [{ at, balance }]);
+    this.holders.set(owner, balance);
+  }
   private move(from: string | null, to: string, amount: bigint) {
     if (from) { const balance = this.usdc.get(from) ?? 0n; if (balance < amount) throw new PendingOperation('Waiting for USDC to cover this payout.'); this.usdc.set(from, balance - amount); }
     this.usdc.set(to, (this.usdc.get(to) ?? 0n) + amount);

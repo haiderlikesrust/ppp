@@ -7,6 +7,7 @@ import { useApp } from '../app';
 import { CoverageLadder } from '../parts/holder';
 import { SectionTitle, packStyle } from '../ui';
 
+type Holding = { firstAt: number | null; complete: boolean; holds: boolean | null };
 type Claim = { memo: string; status: string; priceUsd: number; valueUsd: number; rebateUsd: number; signature: string | null; createdAt: number };
 const STATUS: Record<string, [string, string]> = {
   approved: ['Approved', 'bg-water/15 text-water'], paying: ['Paying', 'bg-water/15 text-water'], queued: ['Queued · limit reached', 'bg-volt-soft text-volt'],
@@ -23,16 +24,17 @@ export function ClaimPage() {
   const [pasted, setPasted] = useState('');
   const [found, setFound] = useState<ClaimCandidate | null>(null);
   const [showOther, setShowOther] = useState(false);
+  const [holding, setHolding] = useState<Holding | null>(null);
 
   const scan = useCallback(async (quiet = false) => {
     if (!me.wallet) return;
     if (!quiet) setBusy('scan');
-    try { const r = await api<{ candidates: ClaimCandidate[]; claims: Claim[] }>('/claims/scan'); setCandidates(r.candidates); setClaims(r.claims); }
+    try { const r = await api<{ candidates: ClaimCandidate[]; claims: Claim[]; holding: Holding }>('/claims/scan'); setCandidates(r.candidates); setClaims(r.claims); setHolding(r.holding); }
     // Background refreshes stay quiet; only a scan the user asked for reports errors.
     catch (e) { if (!quiet) notify((e as Error).message); } finally { if (!quiet) setBusy(null); }
   }, [me.wallet, notify]);
   // Another wallet (or none) means the previous wallet's pulls must not stay on screen.
-  useEffect(() => { setCandidates(null); setClaims([]); setFound(null); }, [me.wallet]);
+  useEffect(() => { setCandidates(null); setClaims([]); setFound(null); setHolding(null); }, [me.wallet]);
   // Re-scan after practice tools change something, but only once the user has scanned.
   useEffect(() => { if (candidates) scan(true); }, [version]); // eslint-disable-line react-hooks/exhaustive-deps
   // Refresh while a claim is still moving, gently: the scan is rate limited.
@@ -62,8 +64,8 @@ export function ClaimPage() {
     catch (e) { setFound(null); notify((e as Error).message); } finally { setBusy(null); }
   }
 
-  const o = config?.settings?.offsite, activation: number = config?.settings?.offsiteActivationHours ?? 0;
-  const window = windowLabel(o?.claimWindowHours ?? 24);
+  const o = config?.settings?.offsite, activation: number = config?.settings?.offsiteActivationHours ?? 0, hold: number = config?.settings?.offsiteHoldHours ?? 0;
+  const window = windowLabel(o?.claimWindowHours ?? 48);
   const daily = [(o?.perWalletDailyClaims ?? 0) > 0 && `${o.perWalletDailyClaims} claim${o.perWalletDailyClaims > 1 ? 's' : ''}`, (o?.perWalletDailyUsd ?? 0) > 0 && money(o.perWalletDailyUsd)].filter(Boolean);
   const eligible = candidates?.filter(c => c.eligible) ?? [], other = candidates?.filter(c => !c.eligible) ?? [];
   const screen = !me.wallet ? ['NO WALLET', 'Connect the wallet that opened the pack.']
@@ -82,6 +84,13 @@ export function ClaimPage() {
             <div className="pixel relative text-lg text-water" aria-live="polite">{screen[0]}{busy === 'scan' && <span className="blink">_</span>}</div>
             <div className="relative mt-1 text-xs text-muted">{screen[1]}</div>
           </div>
+          {me.wallet && <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-line px-3 py-2.5 text-xs">
+            <span className="label">You bought in</span>
+            <span className="num text-right">{!holding ? <span className="text-faint">Scan to check</span>
+              : holding.firstAt ? <>{when(holding.firstAt)} <span className="text-muted">· {ago(holding.firstAt)}</span></>
+              : holding.holds === false ? <span className="text-loss">No coin in this wallet</span>
+              : holding.complete ? <span className="text-loss">Never</span> : <span className="text-muted">Long ago</span>}</span>
+          </div>}
           <button className="btn btn-primary mt-4 h-12 w-full" onClick={() => me.wallet ? scan() : connect()} disabled={busy === 'scan'}>
             {busy === 'scan' ? <Loader2 className="animate-spin" size={17} /> : <ScanSearch size={17} />}{me.wallet ? (candidates ? 'Scan again' : 'Scan my wallet') : 'Connect to scan'}</button>
 
@@ -95,26 +104,29 @@ export function ClaimPage() {
           </form>
         </div>
         <ol className="border-t border-line bg-raised/40 px-5 py-4 text-sm">
-          {[[`Last ${window}`, 'Bought and delivered to this same wallet.'],
-            [activation > 0 ? `Starts ${activation}h after connecting` : 'Covered right away', activation > 0 ? 'Your balance has to stay in tier through the pull.' : 'No waiting period once you hold a tier.'],
-            [daily.length ? `Up to ${daily.join(' and ')} a day` : 'No daily limit', `${(o?.perWalletWeeklyUsd ?? 0) > 0 ? `At most ${money(o.perWalletWeeklyUsd)} a week. ` : ''}One claim per pack.`]].map(([title, text], i) =>
+          {[[`Opened in the last ${window}`, 'Bought and delivered to this same wallet, on any app. Each pack can be claimed once.'],
+            ['Opened after you bought in', `We read your coin history on-chain. Packs opened before you first held the coin aren't covered${hold > 0 ? `, and you need to have held it for ${hold}h before the pull` : ''}.`],
+            ['Your tier is your lowest balance since', 'Selling after the pull lowers it, even if you buy back.'],
+            ...(activation > 0 ? [[`Starts ${activation}h after connecting`, 'Pulls from before that are not covered.']] : []),
+            // Limits only show when the owner sets some; by default claims are unlimited.
+            ...(daily.length || (o?.perWalletWeeklyUsd ?? 0) > 0 ? [[daily.length ? `Up to ${daily.join(' and ')} a day` : 'No daily limit', (o?.perWalletWeeklyUsd ?? 0) > 0 ? `At most ${money(o.perWalletWeeklyUsd)} a week.` : '']] : [])].map(([title, text], i) =>
             <li key={i} className="flex gap-3 py-1.5"><span className="pixel w-5 shrink-0 text-xs text-water">{i + 1}</span><span><span className="text-ink">{title}.</span> <span className="text-muted">{text}</span></span></li>)}
         </ol>
       </div>
-      <p className="mt-3 px-1 text-xs text-muted">Packs opened on Pullback are paid back automatically. This page is for packs opened directly on Collector Crypt.</p>
+      <p className="mt-3 px-1 text-xs text-muted">Packs opened on Pullback are paid back automatically. This page is for packs opened on Collector Crypt, pump.fun, Jupiter or any other app that sells Collector Crypt packs.</p>
     </aside>
 
     {/* Results */}
     <section className="min-w-0">
       <h1 className="pixel text-3xl leading-tight sm:text-4xl">CLAIM A <span className="text-water">PULL</span></h1>
-      <p className="mt-2 max-w-xl text-muted">Opened a pack on Collector Crypt that came in under the pack price? Claim part of the difference back. You keep the card.</p>
+      <p className="mt-2 max-w-xl text-muted">Opened a pack on Collector Crypt, pump.fun or Jupiter that came in under the pack price? Claim part of the difference back. You keep the card.</p>
 
       {found && <div className="card enter mt-6 overflow-hidden border-water/40"><div className="border-b border-line bg-raised px-5 py-2"><span className="label">Found from your link</span></div><ClaimRow c={found} busy={busy === found.memo} onClaim={() => claim(found)} /></div>}
 
       {!candidates ? <div className="mt-6 grid place-items-center rounded-[10px] border border-dashed border-line px-6 py-16 text-center">
         <ScanSearch size={34} className="text-water" />
         <div className="pixel mt-4 text-lg">Nothing scanned yet</div>
-        <p className="mt-1 max-w-sm text-sm text-muted">{me.wallet ? `Scan to list every Collector Crypt pack this wallet opened in the last ${window}, and what each one can get back.` : 'Connect the wallet that opened the pack, then scan.'}</p>
+        <p className="mt-1 max-w-sm text-sm text-muted">{me.wallet ? `Scan to list every Collector Crypt pack this wallet opened in the last ${window}, on any app, and what each one can get back.` : 'Connect the wallet that opened the pack, then scan.'}</p>
       </div> : <>
         <div className="mt-8">
           <SectionTitle title={eligible.length ? `${eligible.length} to claim` : 'Nothing to claim'} sub={candidates.length ? `${candidates.length} pack${candidates.length > 1 ? 's' : ''} found in the last ${window}.` : `No Collector Crypt packs from this wallet in the last ${window}.`} />
@@ -146,6 +158,9 @@ export function ClaimPage() {
     </section>
   </div>;
 }
+
+/** "Oct 19, 14:02" in the visitor's own time zone. */
+const when = (at: number) => new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 function ClaimRow({ c, busy, onClaim }: { c: ClaimCandidate; busy: boolean; onClaim: () => void }) {
   const p = packStyle(c.packCode, c.priceUsd);

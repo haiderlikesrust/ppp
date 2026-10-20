@@ -3,6 +3,17 @@ import type { PaymentIntent } from './payment';
 
 /** A Collector Crypt pack payment found in a user's own transaction history. */
 export type CcPayment = { memo: string; signature: string; priceMicros: number; blockTime: number };
+
+/** A wallet's coin balance over time, from on-chain history. */
+export type HolderHistory = {
+  /** Balance after each change, oldest first: the last change before the requested start, then every change since. */
+  changes: { at: number; balance: bigint }[];
+  current: bigint;
+  /** When the wallet first received the coin; null when it never has, or its history is too long to read back that far. */
+  firstAt: number | null;
+  /** Every change back to the first one was read. */
+  complete: boolean;
+};
 export type PackMachine = { priceUsd: number; code: string };
 export type PurchaseResult = { state: 'pending'; message: string; memo?: string; signature?: string } | { state: 'complete'; memo: string; signature: string; card: Card };
 export type PaymentState = { state: 'confirmed'; signature: string } | { state: 'pending' } | { state: 'failed'; reason: string } | { state: 'expired' };
@@ -34,6 +45,8 @@ export interface Solana {
   readonly holderMint: string | null;
   holderBalance(owner: string): Promise<bigint>;
   holderSupply(): Promise<bigint>;
+  /** The wallet's coin balance changes since `sinceMs` (and the last one before), and when it first got the coin. */
+  holderHistory(owner: string, sinceMs: number): Promise<HolderHistory>;
   usdcBalance(owner: string): Promise<bigint>;
   buildUserPayment(user: string, micros: number, memo: string): Promise<BuiltPayment>;
   /** Validates the wallet-signed bytes against the intent, broadcasts, and returns the signature. */

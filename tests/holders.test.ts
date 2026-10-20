@@ -34,14 +34,26 @@ test('a steady holder keeps their tier; no record before the window means no tie
   await s.db.close();
 });
 
-test('off-site coverage is immediate: a new wallet is judged on the balances seen since it connected', async () => {
+test('off-site coverage comes from the on-chain coin history, not from when the wallet connected', async () => {
   const s = await setup(), wallet = Keypair.generate().publicKey.toBase58(), now = Date.now();
-  s.solana.setHolderPpm(wallet, 10_000); await s.holders.snapshot(wallet, now - 10 * HOUR);
-  assert.equal((await s.holders.offsiteTier(wallet, now - 10 * HOUR, now - 12 * HOUR)).tier?.id, 't2', 'pull before connecting still counts');
-  // A dip after connecting still lowers the tier.
-  s.solana.setHolderPpm(wallet, 0); await s.holders.snapshot(wallet, now - 5 * HOUR);
   s.solana.setHolderPpm(wallet, 10_000);
-  assert.equal((await s.holders.offsiteTier(wallet, now - 10 * HOUR, now - 12 * HOUR)).tier, null);
+  s.solana.boughtAt(wallet, now - 10 * HOUR);
+  assert.equal((await s.holders.offsiteTier(wallet, now, now - 6 * HOUR)).tier?.id, 't2', 'a pull after buying in counts, even before the wallet ever connected');
+  assert.match((await s.holders.offsiteTier(wallet, now, now - 12 * HOUR)).reason!, /first bought the coin 2h after this pack was opened/);
+  // A dip after the pull lowers the tier, even if the wallet bought back since.
+  s.solana.setHolderPpm(wallet, 0, now - 3 * HOUR); s.solana.setHolderPpm(wallet, 10_000);
+  s.holders.forget(wallet);
+  assert.equal((await s.holders.offsiteTier(wallet, now, now - 6 * HOUR)).tier, null);
+  await s.db.close();
+});
+
+test('an owner-set holding time before the pull is enforced from the same history', async () => {
+  const s = await setup({ offsiteHoldHours: 24 }), wallet = Keypair.generate().publicKey.toBase58(), now = Date.now();
+  s.solana.setHolderPpm(wallet, 10_000);
+  s.solana.boughtAt(wallet, now - 30 * HOUR);
+  assert.equal((await s.holders.offsiteTier(wallet, now, now - 2 * HOUR)).tier?.id, 't2', 'held 28h before the pull');
+  s.solana.boughtAt(wallet, now - 12 * HOUR); s.holders.forget(wallet);
+  assert.match((await s.holders.offsiteTier(wallet, now, now - 2 * HOUR)).reason!, /bought the coin 10h before this pack was opened; you need to have held it for 24h/);
   await s.db.close();
 });
 

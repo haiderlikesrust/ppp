@@ -17,9 +17,9 @@ const until = (at: number | null) => {
 type ClaimRow = { memo: string; wallet: string; status: string; value_micros: string; rebate_micros: string; coverage_bps: number; signature: string | null; created_at: string };
 
 /**
- * Off-site claims for packs opened directly on Collector Crypt. A pull qualifies only when
- * the claimant's own wallet paid for it on-chain, Collector Crypt's record agrees, and the
- * wallet holds a tier balance. Each pack (memo) can be claimed once; per-wallet daily claim
+ * Off-site claims for Collector Crypt packs opened on any app. A pull qualifies only when the
+ * claimant's own wallet paid for it on-chain, Collector Crypt's record agrees, it was opened inside
+ * the claim window and after the wallet bought the coin, and the wallet has held a tier balance since. Each pack (memo) can be claimed once; per-wallet daily claim
  * and payout limits bound how fast any one wallet can draw on the pool.
  */
 export class Claims {
@@ -53,8 +53,14 @@ export class Claims {
     return value;
   }
 
-  /** Drops a wallet's cached scan (practice mode adds pulls on demand). */
-  forget(wallet: string) { this.paymentCache.delete(wallet); }
+  /** Drops a wallet's cached scan and coin history (practice mode changes them on demand). */
+  forget(wallet: string) { this.paymentCache.delete(wallet); this.holders.forget(wallet); }
+
+  /** When the wallet first got the coin and whether it holds any now, for the Claim page. */
+  async holding(wallet: string) {
+    try { const h = await this.holders.history(wallet); return { firstAt: h.firstAt, complete: h.complete, holds: h.current > 0n }; }
+    catch { return { firstAt: null, complete: false, holds: null }; }
+  }
 
   async scan(wallet: string, activatedAt: number): Promise<ClaimCandidate[]> {
     const payments = await this.payments(wallet);
@@ -81,7 +87,9 @@ export class Claims {
     if (problem) return no(problem, known);
     if (valueMicros! >= p.priceMicros) return no('This pull was worth at least what you paid.', known);
     if (!s.offsite.enabled || s.paused) return no('Off-site claims are paused right now.', known);
-    const check = await this.holders.offsiteTier(wallet, activatedAt, p.blockTime);
+    let check;
+    try { check = await this.holders.offsiteTier(wallet, activatedAt, p.blockTime); }
+    catch (e) { return no(/^This wallet/.test((e as Error).message) ? (e as Error).message : 'Your coin history could not be read right now. Try again shortly.', known); }
     if (!check.tier) return no(check.reason ?? 'Your holdings did not qualify for this pull.', known);
     const coverage = offsiteCoverageBps(check.tier, health ?? await this.pool.health());
     const rebate = rebateMicros(p.priceMicros, valueMicros!, coverage, offsiteRebateCapMicros(s));
@@ -133,8 +141,7 @@ export class Claims {
 
   /** A claim that waited in the queue is paid only if the wallet still holds the tier it was granted. */
   private async stillHolds(row: ClaimRow) {
-    await this.holders.snapshot(row.wallet);
-    const check = await this.holders.tierFor(row.wallet, Number(row.created_at), Date.now());
+    const check = await this.holders.heldSince(row.wallet, Number(row.created_at));
     return !!check.tier && check.tier.offsiteCoverageBps >= row.coverage_bps;
   }
 

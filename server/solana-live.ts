@@ -7,7 +7,8 @@ import { buildPayment, validatePaymentMessage, validateSignedPayment, type Payme
 import { parseCcPayment } from './cc/history';
 import { swap } from './swap';
 import { collectCreatorFees, creatorFeesDue } from './fees';
-import type { BuiltPayment, CcPayment, PaymentState, Solana } from './ports';
+import type { BuiltPayment, CcPayment, HolderHistory, PaymentState, Solana } from './ports';
+import { readHolderHistory } from './coin-history';
 import type { Settings } from '../shared/types';
 
 /**
@@ -50,6 +51,10 @@ export class LiveSolana implements Solana {
     if (!this.rpc || !this.holderMint) return 0n;
     const accounts = await this.rpc.getParsedTokenAccountsByOwner(new PublicKey(owner), { mint: new PublicKey(this.holderMint) }, 'confirmed');
     return accounts.value.reduce((s, a) => s + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n);
+  }
+  async holderHistory(owner: string, sinceMs: number): Promise<HolderHistory> {
+    if (!this.rpc || !this.holderMint) return { changes: [], current: 0n, firstAt: null, complete: true };
+    return readHolderHistory(this.rpc, readParsedTransactions, owner, this.holderMint, sinceMs);
   }
   async holderSupply() {
     if (!this.rpc || !this.holderMint) return 0n;

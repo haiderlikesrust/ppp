@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { Card } from '../../shared/types';
 import { money } from './api';
@@ -217,18 +218,19 @@ export function Modal({ open, onClose, children, width = 'max-w-md', dismissable
     return () => { document.body.style.overflow = overflow; chrome.forEach(el => { el.inert = false; }); previous?.focus?.(); };
   }, [open]);
   if (!open) return null;
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => dismissable && onClose()}>
+  // Rendered under <body>: the page behind is made inert while a modal is open, and a modal inside it would go inert too.
+  return createPortal(<div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => dismissable && onClose()}>
     <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={label} className={`card enter relative max-h-[92vh] w-full overflow-auto border-t-2 border-t-volt p-6 shadow-2xl outline-none ${width}`} onClick={e => e.stopPropagation()}>
-      {dismissable && <button aria-label="Close" className="absolute right-3 top-3 rounded-md p-1.5 text-muted hover:bg-raised hover:text-ink" onClick={onClose}><X size={18} /></button>}
+      {dismissable && <button aria-label="Close" className="absolute right-3 top-3 z-10 rounded-md p-1.5 text-muted hover:bg-raised hover:text-ink" onClick={onClose}><X size={18} /></button>}
       {children}
     </div>
-  </div>;
+  </div>, document.body);
 }
 
 export function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   useEffect(() => { if (!message) return; const t = setTimeout(onClose, 6000); return () => clearTimeout(t); }, [message, onClose]);
   if (!message) return null;
-  return <div role="status" className="enter fixed bottom-5 left-4 right-4 z-[60] flex items-center gap-3 rounded-lg border border-line border-l-4 border-l-volt bg-raised py-3 pl-4 pr-2 text-sm shadow-2xl sm:left-6 sm:right-auto sm:max-w-md">
+  return <div role="status" className="enter fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-4 right-4 z-[60] lg:bottom-5 flex items-center gap-3 rounded-lg border border-line border-l-4 border-l-volt bg-raised py-3 pl-4 pr-2 text-sm shadow-2xl sm:left-6 sm:right-auto sm:max-w-md">
     <span className="min-w-0 flex-1">{message}</span><button aria-label="Dismiss" className="rounded-md p-1 text-muted hover:text-ink" onClick={onClose}><X size={15} /></button>
   </div>;
 }

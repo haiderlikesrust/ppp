@@ -106,26 +106,52 @@ body {
 .card-holo { transform: translateX(-70%); animation: holo 4s ease-in-out infinite; }
 @keyframes holo { 50% { transform: translateX(70%); } }
 
-/* Pack opening: charge, rip, scan, reveal */
-.charge-ring { position: absolute; inset: -14%; border: 2px dashed var(--glow); border-radius: 50%; opacity: .55; animation: spin 6s linear infinite; pointer-events: none; }
-.charge-ring.fast { animation-duration: 1.6s; opacity: .9; }
+/* Pack opening: a gacha machine in a lit display case. Effects that leave rest at their hidden end
+   state, so with reduced motion (no animation at all) only the machine or the card shows. */
+.stage { position: relative; overflow: hidden; isolation: isolate; border-radius: 12px; border: 1px solid var(--color-line);
+  background: radial-gradient(60% 48% at 50% 40%, color-mix(in srgb, var(--glow) 26%, transparent), transparent 72%), radial-gradient(rgb(255 255 255 / .05) 1px, transparent 1px) 0 0 / 14px 14px, var(--color-bg); }
+.stage .booster-img { filter: drop-shadow(0 14px 22px color-mix(in srgb, var(--glow) 42%, transparent)); }
 @keyframes spin { to { rotate: 360deg; } }
-.pixel-spark { position: absolute; left: 50%; top: 45%; width: 6px; height: 6px; background: var(--color-volt); animation: pixel-spark 1s steps(6) infinite; pointer-events: none; }
+.sweep { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(105deg, transparent 36%, rgb(255 255 255 / .32) 50%, transparent 64%); mix-blend-mode: overlay; opacity: 0; animation: sweep 1.3s ease-in-out infinite; }
+@keyframes sweep { from { opacity: 1; transform: translateX(-100%); } to { opacity: 1; transform: translateX(100%); } }
+.coin { position: absolute; left: 50%; top: 3%; z-index: 2; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--color-volt); box-shadow: inset 0 0 0 3px #c99a12; opacity: 0; pointer-events: none; animation: coin-drop 1.2s steps(12) infinite; }
+@keyframes coin-drop { 0% { opacity: 0; transform: translateY(-14px); } 12% { opacity: 1; } 35% { transform: translateY(26px) scaleX(.25); } 60% { transform: translateY(54px) scaleX(1); } 82% { opacity: 1; transform: translateY(72px) scaleX(.3); } 100% { opacity: 0; transform: translateY(84px) scaleX(.3); } }
+.pixel-spark { position: absolute; left: 50%; top: 42%; width: 6px; height: 6px; background: var(--color-volt); animation: pixel-spark 1s steps(6) infinite; pointer-events: none; }
 @keyframes pixel-spark { 0% { transform: translate(0, 0); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
-.rip-strip, .rip-body { position: absolute; inset: 0; pointer-events: none; z-index: 3; opacity: 0; }
-.rip-strip { clip-path: inset(0 0 82% 0); animation: rip-strip .7s cubic-bezier(.3,.7,.3,1) both; }
-.rip-body { clip-path: inset(18% 0 0 0); animation: rip-body .8s cubic-bezier(.5,0,.7,.4) .15s both; }
-@keyframes rip-strip { 0% { opacity: 1; transform: none; } 30% { opacity: 1; transform: translateX(10px) rotate(2deg); } 100% { opacity: 0; transform: translate(150px, -90px) rotate(28deg); } }
-@keyframes rip-body { 0% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(70%); } }
-.card-up { animation: card-up .85s cubic-bezier(.2,.9,.3,1.1) .25s both; }
-@keyframes card-up { from { opacity: 0; transform: translateY(42%) scale(.82); } 60% { opacity: 1; } to { opacity: 1; transform: none; } }
-.scan-line { position: absolute; left: -4%; right: -4%; height: 3px; top: 0; background: var(--color-volt); box-shadow: 0 0 18px 4px rgb(255 210 63 / .55); z-index: 4; opacity: 0; animation: scan-line 1s ease-in-out .55s both; pointer-events: none; }
-@keyframes scan-line { 0% { opacity: 1; top: 0; } 90% { opacity: 1; top: 100%; } 100% { opacity: 0; top: 100%; } }
-.scanned { animation: scanned 1s ease-in-out .55s both; }
-@keyframes scanned { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
-.shiny { position: absolute; inset: -18%; z-index: 0; pointer-events: none; background: repeating-conic-gradient(from 0deg, rgb(255 210 63 / .35) 0 6deg, transparent 6deg 24deg); mask: radial-gradient(closest-side, #000 25%, transparent); animation: spin 14s linear infinite, enter .6s ease-out 1.2s both; }
-.shiny-burst { position: absolute; left: 50%; top: 40%; width: 8px; height: 8px; background: var(--color-volt); z-index: 5; pointer-events: none; animation: shiny-burst .9s steps(7) 1.3s both; }
-@keyframes shiny-burst { 0% { transform: translate(0, 0) scale(1); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(.5); opacity: 0; } }
+/* The reveal: flash, the machine drops away, a capsule pops and splits, the card flips up out of it. */
+.machine-out { opacity: 0; animation: machine-out .55s ease-in .12s both; }
+@keyframes machine-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(45%) scale(.8); } }
+.flash { position: absolute; inset: 0; z-index: 5; background: #fff; opacity: 0; pointer-events: none; animation: flash .5s ease-out both; }
+@keyframes flash { 0% { opacity: 0; } 18% { opacity: .85; } 100% { opacity: 0; } }
+.cap { position: absolute; left: 50%; top: 42%; z-index: 4; width: 78px; height: 39px; margin-left: -39px; opacity: 0; pointer-events: none; }
+.cap-top { margin-top: -39px; transform-origin: 50% 100%; border-radius: 39px 39px 0 0; background: linear-gradient(160deg, color-mix(in srgb, var(--glow) 60%, white), var(--glow)); box-shadow: inset 0 -5px 0 rgb(0 0 0 / .25); animation: cap-top 1.05s cubic-bezier(.4,0,.6,1) .12s both; }
+.cap-bottom { transform-origin: 50% 0; border-radius: 0 0 39px 39px; background: linear-gradient(#f4f6fa, #c4cbd7); border-top: 5px solid var(--color-night); animation: cap-bottom 1.05s cubic-bezier(.4,0,.6,1) .12s both; }
+.cap-bottom::before { content: ''; position: absolute; left: 50%; top: -11px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #f4f6fa; border: 3px solid var(--color-night); }
+@keyframes cap-top { 0% { opacity: 0; transform: scale(0); } 22% { opacity: 1; transform: scale(1.15); } 32%, 55% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translate(-46px, -84px) rotate(-40deg); } }
+@keyframes cap-bottom { 0% { opacity: 0; transform: scale(0); } 22% { opacity: 1; transform: scale(1.15); } 32%, 55% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translate(40px, 96px) rotate(30deg); } }
+.card-flip { transform-origin: 50% 60%; animation: card-flip .8s cubic-bezier(.2,.9,.3,1.15) .62s both; }
+@keyframes card-flip { from { opacity: 0; transform: perspective(700px) translateY(24%) scale(.55) rotateY(85deg); } 55% { opacity: 1; } to { opacity: 1; transform: none; } }
+.slab-shine { position: absolute; inset: 0; z-index: 2; border-radius: 10px; pointer-events: none; background: linear-gradient(115deg, transparent 30%, rgb(255 255 255 / .5) 48%, transparent 66%) 0 0 / 250% 100%; mix-blend-mode: overlay; opacity: 0; animation: slab-shine 1s ease-in-out 1.3s both; }
+@keyframes slab-shine { from { opacity: 1; background-position: 120% 0; } to { opacity: 0; background-position: -60% 0; } }
+.shiny { position: absolute; inset: -30%; z-index: -1; pointer-events: none; background: repeating-conic-gradient(from 0deg, rgb(255 210 63 / .35) 0 6deg, transparent 6deg 24deg); mask: radial-gradient(closest-side, #000 25%, transparent); animation: spin 14s linear infinite, enter .6s ease-out 1.2s both; }
+.shiny-burst { position: absolute; left: 50%; top: 40%; width: 8px; height: 8px; background: var(--color-volt); z-index: 5; pointer-events: none; opacity: 0; animation: shiny-burst .9s steps(7) 1.3s both; }
+@keyframes shiny-burst { 0% { transform: translate(0, 0) scale(1); opacity: 0; } 8% { opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(.5); opacity: 0; } }
+/* A bad pull: the rebate pops up and green coins fly back. */
+.rebate-coin { position: absolute; left: 50%; bottom: 10%; z-index: 5; width: 10px; height: 10px; margin-left: -5px; background: var(--color-gain); box-shadow: inset 0 0 0 2px #2a9d5c; opacity: 0; pointer-events: none; animation: rebate-coin 1.1s steps(9) both; }
+@keyframes rebate-coin { 0% { opacity: 0; transform: translate(0, 0); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), -170px); } }
+.pop { animation: pop .45s cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes pop { from { opacity: 0; transform: scale(.3); } to { opacity: 1; transform: none; } }
+/* The display's LED row: idle, chasing while it works, solid when done. */
+.leds { display: flex; flex-shrink: 0; gap: 3px; }
+.leds i { width: 6px; height: 6px; background: var(--color-raised); }
+.leds.insert i:first-child { background: var(--color-volt); animation: blink 1s steps(1) infinite; }
+.leds.confirm i, .leds.open i { animation: led var(--led, 1.6s) steps(1) infinite; animation-delay: calc(var(--i) * var(--led, 1.6s) / 8); }
+.leds.open { --led: .64s; }
+@keyframes led { 0%, 24% { background: var(--color-volt); } 25%, 100% { background: var(--color-raised); } }
+.leds.reveal i { background: var(--glow); }
+.leds.done i { background: var(--color-gain); }
+.leds.done.hit i { background: var(--color-volt); }
+.leds.failed i { background: color-mix(in srgb, var(--color-loss) 45%, transparent); }
 .confetti { position: absolute; inset: -1rem; overflow: hidden; pointer-events: none; z-index: 5; }
 .confetti i { position: absolute; top: -12px; width: 7px; height: 7px; animation: confetti 1.8s steps(18) forwards; }
 @keyframes confetti { to { transform: translateY(560px); opacity: 0; } }

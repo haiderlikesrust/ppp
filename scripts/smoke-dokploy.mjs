@@ -31,7 +31,7 @@ if (gateway) {
   assert.match(homepage.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.match(homepage.headers.get('cache-control') ?? '', /no-cache/, 'index.html is revalidated so deploys show up at once');
 }
-for (const path of ['/claim', '/pool', '/how-it-works', '/docs', '/admin', '/favicon.png', '/site.webmanifest']) {
+for (const path of ['/claim', '/stats', '/pool', '/how-it-works', '/docs', '/admin', '/favicon.png', '/site.webmanifest']) {
   const response = await fetch(base + path);
   assert.equal(response.status, 200, path);
   assert.ok((await response.arrayBuffer()).byteLength, path);
@@ -66,6 +66,7 @@ const appConfig = await (await fetch(`${base}/api/config`)).json();
 assert.equal(appConfig.mode, 'read-only');
 assert.equal((await fetch(`${base}/api/pool`)).status, 200);
 assert.equal((await fetch(`${base}/api/activity`)).status, 200);
+for (const path of ['/api/stats', '/api/pulls/recent', '/api/leaderboard', '/api/leaderboard?week=last']) assert.equal((await fetch(base + path)).status, 200, path);
 const practice = await fetch(`${base}/api/practice/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', origin }, body: '{}' });
 assert.equal(practice.status, 404, 'Practice endpoints do not exist in production');
 const crossSite = await fetch(`${base}/api/auth/challenge`, { method: 'POST', headers: { 'Content-Type': 'application/json', origin: 'https://evil.example' }, body: '{}' });

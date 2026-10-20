@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import { ShowcaseSource } from './showcase';
+import { leaderboard } from './leaderboard';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -112,7 +113,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
 
   app.get('/api/claims/scan', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);
-    return { candidates: await s.claims.scan(session.wallet, session.activatedAt), claims: await s.claims.list(session.wallet) };
+    return { candidates: await s.claims.scan(session.wallet, session.activatedAt), claims: await s.claims.list(session.wallet), holding: await s.claims.holding(session.wallet) };
   });
   const txSignature = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{64,90}$/);
   // A pull the scan can't find (for example buried under spam transfers), looked up by its own transaction.
@@ -123,7 +124,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
   });
   app.post('/api/claims/:memo', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);
-    const { memo } = z.object({ memo: z.string().regex(/^cc-[a-f0-9-]{36}$/) }).parse(req.params);
+    const { memo } = z.object({ memo: z.string().regex(/^[a-z0-9]{2,16}-[a-f0-9-]{36}$/) }).parse(req.params);
     const { signature } = z.object({ signature: txSignature.optional() }).parse(req.body ?? {});
     // Verification (RPC + Collector Crypt) runs outside the queue; the limit checks and insert run inside it.
     return s.claims.claim(session.wallet, session.activatedAt, memo, signature, fn => serial.run(fn));
@@ -133,6 +134,13 @@ export async function createApp(options: { services?: Services; timers?: boolean
   app.get('/api/activity', async () => ({ items: await s.pool.activity() }));
   // Collector Crypt's pack images and one real card, for the site's artwork.
   app.get('/api/showcase', async () => showcase.get());
+  app.get('/api/pulls/recent', async () => ({ items: s.feed.recent(24) }));
+  app.get('/api/stats', async () => s.feed.stats());
+  app.get('/api/leaderboard', async req => {
+    const { week } = z.object({ week: z.enum(['current', 'last']).default('current') }).parse(req.query);
+    const viewer = await sessionWallet(db, req.cookies[COOKIE]).catch(() => null);
+    return leaderboard(db, week, viewer?.wallet ?? null);
+  });
 
   app.get('/api/admin', async req => {
     await auth(req, true);
@@ -206,6 +214,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
       const session = await auth(req);
       const { ppm } = z.object({ ppm: z.number().int().min(0).max(1_000_000) }).parse(req.body);
       mock.setHolderPpm(session.wallet, ppm);
+      s.claims.forget(session.wallet);
       return s.holders.view(session.wallet, session.activatedAt);
     });
     // Moves activation and holdings history back in time so off-site coverage can be tried immediately.
@@ -215,6 +224,14 @@ export async function createApp(options: { services?: Services; timers?: boolean
       const at = Date.now() - hours * 3_600_000;
       await serial.run(async () => { await db.query('UPDATE wallets SET activated_at=LEAST(activated_at,$2) WHERE wallet=$1', [session.wallet, at]); await s.holders.snapshot(session.wallet, at); });
       return { activatedAt: at };
+    });
+    // Restarts the wallet's coin history: it first bought its current holdings `hoursAgo` hours ago.
+    app.post('/api/practice/bought', async req => {
+      const session = await auth(req);
+      const { hoursAgo } = z.object({ hoursAgo: z.number().min(0).max(24 * 30) }).parse(req.body);
+      mock.boughtAt(session.wallet, Date.now() - hoursAgo * 3_600_000);
+      s.claims.forget(session.wallet);
+      return { ok: true };
     });
     app.post('/api/practice/offsite-pull', async req => {
       const session = await auth(req);

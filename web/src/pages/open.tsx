@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Check } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUpRight, Check, Plus } from 'lucide-react';
 import type { OrderView, PoolView, Quote } from '../../../shared/types';
 import { ago, api, friendly, money, pct, solscan } from '../api';
 import { Link, useApp } from '../app';
@@ -7,9 +7,11 @@ import { ensureSigner, hasSigner, signPayment } from '../wallet';
 import { CoverageLadder } from '../parts/holder';
 import { ContractAddress } from '../parts/contract';
 import { PackOpening } from '../parts/opening';
+import { RecentPullsStrip } from '../parts/pulls';
 import { XLogo, X_HANDLE, X_URL } from '../parts/social';
 import { Booster, Modal, RebateBar, SectionTitle, Slab, isWatch, packStyle } from '../ui';
 import { packDef } from '../../../shared/packs';
+import { windowLabel } from '../../../shared/protection';
 import { useShowcase } from '../showcase';
 
 type Pack = { code: string; priceUsd: number; quote: Quote };
@@ -130,7 +132,6 @@ export function OpenPage() {
       <p className="mt-7 max-w-xl text-lg text-muted">Open Collector Crypt packs here, Pokémon cards and luxury watches. When a pull comes in under the pack price, part of the loss lands back in your wallet in USDC, automatically.</p>
       <div className="mt-9 grid w-full gap-3 sm:flex sm:w-auto">
         <a href="#packs" className="btn btn-primary h-12 px-7">Open a pack<ArrowDown size={16} /></a>
-        <Link href="/claim" className="btn btn-outline h-12 px-7">Opened one elsewhere?</Link>
       </div>
       <ContractAddress variant="hero" className="mx-auto mt-6" />
       <div className="card mt-12 grid w-full max-w-3xl grid-cols-1 divide-y divide-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
@@ -139,6 +140,8 @@ export function OpenPage() {
         <Readout label="Packs protected" value={pool ? String(pool.totals.packsOpened) : '—'} />
       </div>
     </section>
+
+    <CoveredApps hours={s?.offsite?.claimWindowHours ?? 48} />
 
     {/* Example entry */}
     <section className="pb-16">
@@ -161,6 +164,8 @@ export function OpenPage() {
         {packs && !packs.length && <div className="card col-span-full p-6 text-sm text-muted">No packs are available on Collector Crypt right now. Check back soon.</div>}
       </div>
     </section>
+
+    <RecentPullsStrip />
 
     <section className="pb-16"><CoverageLadder /></section>
 
@@ -198,7 +203,7 @@ export function OpenPage() {
           <div className="flex min-w-0 items-center gap-3">
             <i className="size-2.5 shrink-0" style={{ background: packStyle(a.code, a.priceUsd).color }} />
             <div className="min-w-0">
-              <div className="truncate text-sm">{a.cardName ? a.cardName.split(' · ').slice(0, 2).join(' · ') : 'Opened on Collector Crypt'}</div>
+              <div className="truncate text-sm">{a.cardName ? a.cardName.split(' · ').slice(0, 2).join(' · ') : 'Opened off-site'}</div>
               <div className="num truncate text-xs text-muted">{a.wallet} · {money(a.priceUsd)} {packStyle(a.code, a.priceUsd).name} · worth {money(a.valueUsd)}</div>
             </div>
           </div>
@@ -226,6 +231,34 @@ export function OpenPage() {
       {opening && <OpenFlow pack={opening} order={order} onUpdate={setOrder} onAgain={() => { const p = packs?.find(x => x.code === opening.code); close(); if (p) setTimeout(() => open(p), 50); }} onClose={close} />}
     </Modal>
   </>;
+}
+
+/** Apps that sell Collector Crypt packs: they all pay the same machines, so their packs can be claimed here. */
+const APPS = [['pump.fun', '/apps/pump-fun.svg'], ['Collector Crypt', '/apps/collector-crypt.svg'], ['Jupiter', '/apps/jupiter.svg']] as const;
+
+function CoveredApps({ hours }: { hours: number }) {
+  return <section className="pb-16">
+    <div className="card overflow-hidden">
+      <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-center lg:gap-10">
+        <div>
+          <div className="label">Opened a pack somewhere else?</div>
+          <h2 className="pixel mt-2 text-xl sm:text-2xl">COVERED WHEREVER YOU <span className="text-volt">OPEN</span></h2>
+          <p className="mt-2 max-w-md text-sm text-muted">Collector Crypt packs opened on these apps can be claimed here for a rebate, up to {windowLabel(hours)} after the pull.</p>
+        </div>
+        <ul className="grid grid-cols-2 gap-2 lg:flex lg:items-center" aria-label="Apps whose packs are covered">
+          {APPS.map(([name, logo], i) => <li key={name} className="flex min-w-0 items-center gap-2">
+            {i > 0 && <Plus size={14} className="hidden shrink-0 text-faint lg:block" aria-hidden="true" />}
+            <span className="flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-line bg-raised px-3 lg:flex-none lg:px-3.5"><img src={logo} alt="" className="size-6 shrink-0 object-contain" /><span className="min-w-0 text-[13px] font-semibold leading-tight lg:text-sm">{name}</span></span>
+          </li>)}
+          <li className="flex min-w-0 items-center gap-2">
+            <Plus size={14} className="hidden shrink-0 text-faint lg:block" aria-hidden="true" />
+            <span className="flex h-12 min-w-0 flex-1 items-center gap-2 rounded-lg border border-dashed border-line px-3 text-sm text-muted lg:flex-none lg:px-3.5" title="Solflare, Rarible and other apps that sell Collector Crypt packs"><Plus size={16} className="shrink-0" aria-hidden="true" /><span className="truncate">More apps</span></span>
+          </li>
+        </ul>
+      </div>
+      <Link href="/claim" className="flex items-center justify-between gap-3 border-t border-line px-5 py-3.5 text-sm hover:bg-raised sm:px-6"><span className="pixel text-volt">Claim a pack opened elsewhere</span><ArrowRight size={16} className="text-volt" /></Link>
+    </div>
+  </section>;
 }
 
 function Readout({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
@@ -281,11 +314,11 @@ function OpenFlow({ pack, order, onUpdate, onAgain, onClose }: { pack: Pack; ord
   const hit = !!order && order.valueUsd !== null && order.valueUsd >= order.priceUsd;
   const title = status === 'refunding' ? 'Refunding your payment' : status === 'review' ? 'Needs a quick check' : status === 'refunded' ? 'Refunded in full' : status === 'expired' ? 'Payment window closed'
     : revealed ? order!.card!.name.split(' · ')[0] : !order || status === 'awaiting_payment' ? 'Confirm in your wallet' : 'Opening your pack…';
-  return <div className="relative grid gap-8 sm:grid-cols-[190px_1fr]">
+  return <div className="relative grid gap-6 sm:grid-cols-[210px_1fr] sm:gap-8">
     {status === 'complete' && hit && <Confetti />}
-    <PackOpening code={pack.code} priceUsd={priceUsd} status={status} card={order?.card ?? null} hit={hit} />
+    <PackOpening code={pack.code} priceUsd={priceUsd} status={status} card={order?.card ?? null} hit={hit} rebateUsd={order?.rebateUsd ?? null} />
     <div className="min-w-0">
-      <div className="label">{money(priceUsd)} {packStyle(pack.code, priceUsd).name} pack · {pct(order?.coverageBps ?? pack.quote.coverageBps ?? 0)} covered</div>
+      <div className="label pr-8">{money(priceUsd)} {packStyle(pack.code, priceUsd).name} pack · {pct(order?.coverageBps ?? pack.quote.coverageBps ?? 0)} covered</div>
       <h2 className="pixel mt-1.5 text-2xl" aria-live="polite">{title}</h2>
       {revealed && <p className="text-sm text-muted">{order!.card!.name.split(' · ').slice(1).join(' · ')}</p>}
 
@@ -300,7 +333,7 @@ function OpenFlow({ pack, order, onUpdate, onAgain, onClose }: { pack: Pack; ord
         <div className="grid grid-cols-3 gap-3">
           <Mini label="You paid" value={money(order.totalUsd)} />
           <Mini label="Card value" value={money(order.valueUsd)} tone={hit ? 'text-gain' : ''} />
-          <Mini label="Back to you" value={hit ? 'Not needed' : order.rebateUsd === null ? '…' : `+${money(order.rebateUsd)}`} tone={hit ? 'text-muted' : 'text-gain'} />
+          <Mini label="Back to you" value={hit ? 'None' : order.rebateUsd === null ? '…' : `+${money(order.rebateUsd)}`} tone={hit ? 'text-muted' : 'text-gain'} />
         </div>
         {order.rebateUsd !== null && !hit && <div className="mt-5"><RebateBar priceUsd={order.priceUsd} valueUsd={order.valueUsd} rebateUsd={order.rebateUsd} /></div>}
         {status === 'complete' && hit && <p className="mt-4 rounded-md border border-volt/40 bg-volt-soft px-4 py-3 text-sm text-volt">A hit! This one beat the pack price, so no rebate was needed.</p>}

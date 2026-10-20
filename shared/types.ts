@@ -90,3 +90,27 @@ export type HolderView = {
   configured: boolean; balance: string; supply: string; ppm: number; tier: HolderTier | null;
   activatedAt: number | null; offsiteCoverageFrom: number | null;
 };
+
+/** One pull from Collector Crypt's public feed. `pullback` marks packs opened through this site. */
+export type FeedPull = { id: string; code: string; priceUsd: number; valueUsd: number; at: number; card: { name: string; image: string } | null; pullback: boolean };
+
+/** What a pack's recent pulls were worth, over its latest `n` pulls on Collector Crypt. */
+export type PackStats = {
+  code: string; priceUsd: number; n: number; since: number | null;
+  medianUsd: number; meanUsd: number; p10Usd: number; p90Usd: number;
+  /** Share of pulls worth at least the pack price. */
+  hitRate: number;
+  /** Average rebate per pack opened on Pullback, by tier id, at today's settings. */
+  avgRebateUsd: Record<string, number>;
+  /** Best pull of the last 7 days, if one beat 2× the pack price. */
+  best: FeedPull | null;
+};
+export type StatsView = { packs: PackStats[]; updatedAt: number | null };
+
+export type LeaderWallet = { wallet: string; you: boolean };
+export type Leaderboard = {
+  week: 'current' | 'last'; start: number; end: number;
+  hits: (LeaderWallet & { code: string; priceUsd: number; valueUsd: number; card: { name: string; image: string | null } | null; at: number })[];
+  packs: (LeaderWallet & { packs: number; spentUsd: number })[];
+  rebates: (LeaderWallet & { code: string; priceUsd: number; valueUsd: number; rebateUsd: number; source: 'onsite' | 'offsite'; cardName: string | null; at: number })[];
+};

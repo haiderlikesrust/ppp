@@ -36,7 +36,8 @@ export function DocsPage() {
   const fee = pct(s.feeBps), poolShare = pct(s.poolShareBps), burnShare = pct(10_000 - s.poolShareBps);
   const share = (ppm: number) => `${+(ppm / 10_000).toFixed(3)}%`;
   const example = (bps: number) => Math.floor((25 - 9.3) * bps / 100) / 100;
-  const window = windowLabel(s.offsite.claimWindowHours ?? 24);
+  const window = windowLabel(s.offsite.claimWindowHours ?? 48);
+  const limits = s.offsite.perWalletDailyClaims > 0 || s.offsite.perWalletDailyUsd > 0 || s.offsite.perWalletWeeklyUsd > 0 || s.offsite.dailyPoolBps > 0;
 
   return <div className="grid grid-cols-1 gap-12 py-14 md:grid-cols-[14rem_minmax(0,1fr)] md:py-20">
     <aside className="hidden md:block">
@@ -54,10 +55,10 @@ export function DocsPage() {
       <Entry n={1} id="basics" title="The short version">
         <p>Most packs on Collector Crypt, Pokémon cards and luxury watches alike, pull something worth less than the pack. A few pull far more. Pullback pays token holders part of that downside back, in USDC.</p>
         <div className="not-prose my-6 grid gap-px overflow-hidden rounded-[10px] border border-line bg-line sm:grid-cols-3">
-          {[['Hold the token', 'Your lowest balance sets your tier and how much you get back.'], ['Open a pack', `Here, with a ${fee} protection fee, or on Collector Crypt directly.`], ['Get some back', 'When the card is worth less than the pack, part of the gap is paid to you.']].map(([t, d], i) =>
+          {[['Hold the token', 'Your lowest balance sets your tier and how much you get back.'], ['Open a pack', `Here, with a ${fee} protection fee, or on Collector Crypt, pump.fun or Jupiter.`], ['Get some back', 'When the card is worth less than the pack, part of the gap is paid to you.']].map(([t, d], i) =>
             <div key={t} className="bg-surface p-5"><div className="pixel text-2xl text-volt">0{i + 1}</div><div className="pixel mt-3 text-ink">{t}</div><p className="mt-1 text-sm">{d}</p></div>)}
         </div>
-        <p>You always keep the card, and the rebate comes on top. Packs opened here are paid back automatically. Packs opened directly on Collector Crypt can be claimed at a lower rate.</p>
+        <p>You always keep the card, and the rebate comes on top. Packs opened here are paid back automatically. Packs opened on Collector Crypt, pump.fun, Jupiter or another app that sells Collector Crypt packs can be claimed at a lower rate.</p>
       </Entry>
 
       <Entry n={2} id="math" title="The rebate math">
@@ -91,7 +92,7 @@ export function DocsPage() {
         <p>We record every connected wallet's balance every 15 minutes. Your tier for a pull is your <b>lowest</b> balance over the window that matters. Buying just before a pull doesn't raise it, and neither does passing one bag between wallets we're already watching.</p>
         <ul>
           <li><b>Packs opened here:</b> your balance when you pay{s.onsiteHoldHours > 0 ? ` (and for the ${s.onsiteHoldHours} hours before)` : ''} and again when the card arrives. If it dropped in between, the lower tier applies.</li>
-          <li><b>Packs opened elsewhere:</b> from {s.offsiteHoldHours} hours before the pull until you claim, or from when you first connected if that was later. {s.offsiteActivationHours > 0 ? `Coverage starts ${s.offsiteActivationHours} hours after you first connect.` : 'There is no waiting period: you are covered as soon as you connect.'} Your balance is checked again right before payout, so selling below your tier while a claim waits cancels it.</li>
+          <li><b>Packs opened elsewhere:</b> we read your coin history on-chain. The pack must have been opened after you first bought the coin{s.offsiteHoldHours > 0 ? ` (and held it for ${s.offsiteHoldHours} hours)` : ''}, and your tier is your lowest balance from the pull until you claim.</li>
         </ul>
       </Entry>
 
@@ -115,21 +116,21 @@ export function DocsPage() {
       </Entry>
 
       <Entry n={6} id="elsewhere" title="Packs opened elsewhere">
-        <p>Opened a pack directly on Collector Crypt? Connect the same wallet on the <Link href="/claim">Claim page</Link> and scan. We find your pack payment on-chain, then check Collector Crypt's record of the card it sent you. A pull qualifies when:</p>
+        <p>Opened a pack on Collector Crypt, pump.fun, Jupiter or another app that sells Collector Crypt packs? Connect the same wallet on the <Link href="/claim">Claim page</Link> and scan. We find your pack payment on-chain, then check Collector Crypt's record of the card it sent you. A pull qualifies when:</p>
         <ul>
           <li>your wallet paid for the pack, and the card was delivered to that same wallet;</li>
-          <li>it was opened in the last <b>{window}</b>{s.offsiteActivationHours > 0 ? ', after your coverage started' : ''};</li>
+          <li>it was opened in the last <b>{window}</b>, after you first bought the coin{s.offsiteActivationHours > 0 ? ', and after your coverage started' : ''};</li>
           <li>you hold a tier balance;</li>
           <li>the pack wasn't refunded or auto-sold (turbo mode);</li>
           <li>it hasn't been claimed before. Each pack can be claimed once.</li>
         </ul>
-        <p>These packs paid no protection fee, so they get less back. Coverage is immediate, so each wallet has limits instead of a waiting period:</p>
-        <ul>
+        <p>These packs paid no protection fee, so they get less back.{limits ? ' Each wallet has payout limits:' : ' There is no limit on how many you claim.'}</p>
+        {limits && <><ul>
           {s.offsite.perWalletDailyClaims > 0 && <li>up to <b>{s.offsite.perWalletDailyClaims} claims</b> per wallet in any 24 hours;</li>}
           {s.offsite.perWalletDailyUsd > 0 && <li>up to <b>{money(s.offsite.perWalletDailyUsd)}</b> paid to a wallet in any 24 hours{s.offsite.perWalletWeeklyUsd > 0 && <>, and <b>{money(s.offsite.perWalletWeeklyUsd)}</b> in any 7 days</>};</li>}
           {s.offsite.dailyPoolBps > 0 && <li>at most <b>{pct(s.offsite.dailyPoolBps)}</b> of the pool paid out across everyone per day.</li>}
         </ul>
-        <p>Approved claims over a payout limit wait in line and pay out automatically, in order, once there's room.</p>
+        <p>Approved claims over a payout limit wait in line and pay out automatically, in order, once there's room.</p></>}
       </Entry>
 
       <Entry n={7} id="money" title="Where the money comes from">
