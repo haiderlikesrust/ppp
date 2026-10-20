@@ -15,6 +15,7 @@ const ENTRIES = [
   ['elsewhere', 'Packs opened elsewhere'],
   ['money', 'Where the money comes from'],
   ['guardrails', 'Guardrails'],
+  ['stats', 'Stats and leaderboards'],
   ['verify', 'Check it on-chain'],
   ['faq', 'Questions'],
 ] as const;
@@ -89,7 +90,7 @@ export function DocsPage() {
           <tbody>{tiers.map(t => <tr key={t.id} className="border-t border-line"><td className="pixel py-3 text-ink">{t.name}</td><td className="num">{share(t.minSupplyPpm)}+</td><td className="pixel num text-gain">{pct(t.onsiteCoverageBps)}</td><td className="pixel num">{pct(t.offsiteCoverageBps)}</td></tr>)}</tbody>
         </table></div>
         <h3>Your lowest balance counts</h3>
-        <p>We record every connected wallet's balance every 15 minutes. Your tier for a pull is your <b>lowest</b> balance over the window that matters. Buying just before a pull doesn't raise it, and neither does passing one bag between wallets we're already watching.</p>
+        <p>Your tier for a pull is your <b>lowest</b> balance over the time that matters, so selling right after a pull lowers it, even if you buy back later.</p>
         <ul>
           <li><b>Packs opened here:</b> your balance when you pay{s.onsiteHoldHours > 0 ? ` (and for the ${s.onsiteHoldHours} hours before)` : ''} and again when the card arrives. If it dropped in between, the lower tier applies.</li>
           <li><b>Packs opened elsewhere:</b> we read your coin history on-chain. The pack must have been opened after you first bought the coin{s.offsiteHoldHours > 0 ? ` (and held it for ${s.offsiteHoldHours} hours)` : ''}, and your tier is your lowest balance from the pull until you claim.</li>
@@ -120,7 +121,7 @@ export function DocsPage() {
         <ul>
           <li>your wallet paid for the pack, and the card was delivered to that same wallet;</li>
           <li>it was opened in the last <b>{window}</b>, after you first bought the coin{s.offsiteActivationHours > 0 ? ', and after your coverage started' : ''};</li>
-          <li>you hold a tier balance;</li>
+          <li>your lowest balance from the pull until you claim is in a tier;</li>
           <li>the pack wasn't refunded or auto-sold (turbo mode);</li>
           <li>it hasn't been claimed before. Each pack can be claimed once.</li>
         </ul>
@@ -148,14 +149,25 @@ export function DocsPage() {
         <p>Big hits don't offset bad pulls, so a rebate pool could drain fast without limits. These rules keep it paying:</p>
         <ul>
           <li><b>Reserved rebates.</b> Each pack opened here sets aside its largest possible rebate before you pay. If the pool can't cover that, protected packs pause until it can.</li>
-          <li><b>Off-site limits.</b> Per-wallet and pool-wide caps. Off-site coverage also shrinks while the pool is below its {money(s.offsite.targetReserveUsd)} reserve target.</li>
+          <li><b>Off-site coverage follows the pool.</b> It shrinks while the pool is below its {money(s.offsite.targetReserveUsd)} reserve target{limits ? ', and the payout limits above apply' : ''}. Approved claims wait in line until the pool can pay them.</li>
           <li><b>Automatic brake.</b> If rebates for a pack price run above {pct(s.breaker.lossRatioBps)} of the fees that price brings in, protection for that price pauses.</li>
-          <li><b>Lowest-balance tiers</b> stop people buying in for a single pull.</li>
+          <li><b>The buy-in check.</b> A pack opened elsewhere only counts if the wallet already held the token when it was opened, read from its on-chain history, so nobody can buy in after a bad pull and claim it.</li>
+          <li><b>Lowest-balance tiers</b> mean selling after a pull lowers what it pays.</li>
           <li><b>Network fees.</b> Every Solana transaction costs a tiny fee. When our operations wallet runs low, the pool tops it up with SOL, and buys more with {s.gas ? <>at most {money(s.gas.maxUsdPerDay)}</> : 'a small, capped amount'} of USDC a day when it runs low itself. It shows on the <Link href="/pool">Vault page</Link>.</li>
         </ul>
       </Entry>
 
-      <Entry n={9} id="verify" title="Check it on-chain">
+      <Entry n={9} id="stats" title="Stats and leaderboards">
+        <p>The <Link href="/stats">Stats page</Link> shows what Collector Crypt packs really pay out. We read Collector Crypt's public feed of recent pulls every 2 minutes and keep each machine's latest 5,000 pulls.</p>
+        <ul>
+          <li><b>Pack stats:</b> the median card, the hit rate (cards worth at least the pack), the spread of values, and what each tier gets back on average per pack opened here. They use the same math that sets our fees.</li>
+          <li><b>Leaderboards:</b> this week's biggest hit, most packs opened and biggest rebate on Pullback. They reset every Monday at 00:00 UTC, and last week's stay up for a week.</li>
+          <li><b>Recent pulls:</b> the newest pulls with the real card photo, and what your tier would get back on a bad one.</li>
+        </ul>
+        <p>Card values are Collector Crypt's insured values at the moment of each pull. Pullback doesn't set the odds and never sees a pack before it opens.</p>
+      </Entry>
+
+      <Entry n={10} id="verify" title="Check it on-chain">
         <p>Every payment, card transfer, rebate, sale and burn is a Solana transaction, linked from the screen where it happens.</p>
         <ul>
           <li>The <Link href="/pool">Vault page</Link> shows the balance, what's reserved, money in and out, and every burn.</li>
@@ -164,7 +176,7 @@ export function DocsPage() {
         </ul>
       </Entry>
 
-      <Entry n={10} id="faq" title="Questions">
+      <Entry n={11} id="faq" title="Questions">
         <div className="not-prose divide-y divide-line border-y border-line">
           {[
             ['Is this insurance?', 'No. It is a discretionary rebate for holders, funded by creator fees and protection fees. It is not insurance and not a guarantee: payouts depend on the pool and the rules on this page.'],
@@ -172,7 +184,8 @@ export function DocsPage() {
             ['Which card value do you use?', "Collector Crypt's insured value, recorded when the card was pulled. It's the same value Collector Crypt uses itself."],
             ['What if the pool runs low?', 'Rebates for packs opened here are reserved before you pay, so they are always paid. Off-site claims slow down instead: coverage shrinks and claims wait until the pool refills.'],
             ['Can I claim the same pack twice, or from another wallet?', 'No. Each pack can be claimed once, and only by the wallet that paid for it and received the card.'],
-            ['Why my lowest balance, not my current one?', 'So that holding is what earns coverage. Otherwise anyone could buy the token for a minute before a pull and sell right after.'],
+            ['Why my lowest balance, not my current one?', 'So that holding is what earns coverage. Otherwise anyone could buy the token after a bad pull, claim, and sell. A pack only counts if you held the token when it was opened, and selling after the pull lowers your tier.'],
+            ['Is there a limit on claims?', limits ? 'Yes, the payout limits are listed under Packs opened elsewhere. Each pack can be claimed once.' : 'No. Claim as many packs as qualify. Each pack can be claimed once, and one rebate is capped at the amount shown under The rebate math.'],
             ['Which wallets work?', 'Any Solana wallet with Wallet Standard support, such as Phantom, Solflare or Backpack. Signing in is a message signature and never approves a transaction.'],
           ].map(([q, a]) => <details key={q} className="group py-4">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-ink">{q}<span className="pixel text-xl leading-none text-volt transition group-open:rotate-45">+</span></summary>
