@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUpRight, Check, Coins, Package, ShieldCheck } from 'lucide-react';
 import type { OrderView, PoolView, Quote } from '../../../shared/types';
-import { ago, api, money, pct, solscan } from '../api';
+import { ago, api, friendly, money, pct, solscan } from '../api';
 import { Link, useApp } from '../app';
-import { hasSigner, signPayment } from '../wallet';
+import { ensureSigner, hasSigner, signPayment } from '../wallet';
 import { CoverageLadder } from '../parts/holder';
 import { ContractAddress } from '../parts/contract';
 import { Modal, PackArt, RebateBar, SectionTitle, Slab, packStyle } from '../ui';
@@ -15,6 +15,7 @@ const FINAL = ['complete', 'refunded', 'expired', 'review'];
 export function OpenPage() {
   const { me, config, connect, notify, refresh, version } = useApp();
   const [packs, setPacks] = useState<Pack[] | null>(null);
+  const [packsFailed, setPacksFailed] = useState(false);
   const [pool, setPool] = useState<PoolView | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [history, setHistory] = useState<OrderView[]>([]);
@@ -23,7 +24,8 @@ export function OpenPage() {
   const timer = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const load = useCallback(() => {
-    api<{ packs: Pack[] }>('/packs').then(r => setPacks(r.packs)).catch(e => notify(e.message));
+    setPacksFailed(false);
+    api<{ packs: Pack[] }>('/packs').then(r => setPacks(r.packs)).catch(() => setPacksFailed(true));
     api<PoolView>('/pool').then(setPool).catch(() => {});
     api<{ items: Activity[] }>('/activity').then(r => setActivity(r.items)).catch(() => {});
     if (me.wallet) api<{ orders: OrderView[] }>('/orders').then(r => setHistory(r.orders.filter(o => o.card))).catch(() => {}); else setHistory([]);
@@ -41,14 +43,26 @@ export function OpenPage() {
 
   async function open(pack: Pack) {
     if (!me.wallet) return connect();
+    const practice = config?.mode === 'practice' && !hasSigner();
+    // Make sure the signing wallet is ready (and is the signed-in one) before an order reserves anything.
+    if (!practice) {
+      try { await ensureSigner(me.wallet); }
+      catch (e) { notify((e as Error).message); if ((e as { reconnect?: boolean }).reconnect) connect(); return; }
+    }
     setOpening(pack.priceUsd); setOrder(null);
+    let unpaid: string | null = null;
     try {
       const { order: created, transaction } = await api<{ order: OrderView; transaction: string }>('/orders', { priceUsd: pack.priceUsd });
-      setOrder(created);
-      const signed = config?.mode === 'practice' && !hasSigner() ? 'practice' : await signPayment(transaction);
+      unpaid = created.id; setOrder(created);
+      const signed = practice ? 'practice' : await signPayment(transaction);
       setOrder(await api<OrderView>(`/orders/${created.id}/pay`, { signed }));
+      unpaid = null;
       follow(created.id);
-    } catch (e) { notify((e as Error).message); setOpening(null); setOrder(null); load(); }
+    } catch (e) {
+      // Release the unpaid order so the buyer can try again straight away.
+      if (unpaid) await api(`/orders/${unpaid}/cancel`, {}).catch(() => {});
+      notify(friendly(e as Error)); setOpening(null); setOrder(null); load();
+    }
   }
   const close = () => { clearInterval(timer.current); setOpening(null); setOrder(null); };
 
@@ -82,7 +96,9 @@ export function OpenPage() {
       <SectionTitle title="Choose a pack" sub="One graded Pokémon card per pack, straight from Collector Crypt. Prices include protection." />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {(packs ?? []).map(p => <PackCard key={p.priceUsd} pack={p} signedIn={!!me.wallet} busy={opening !== null} onOpen={() => open(p)} />)}
-        {!packs && [0, 1, 2, 3].map(i => <div key={i} className="card aspect-[3/5] animate-pulse" />)}
+        {!packs && !packsFailed && [0, 1, 2, 3].map(i => <div key={i} className="card aspect-[3/5] animate-pulse" />)}
+        {!packs && packsFailed && <div className="card col-span-full flex flex-wrap items-center justify-between gap-3 p-6"><div><div className="font-semibold">Packs could not be loaded.</div><div className="text-sm text-muted">Collector Crypt or our server did not answer. Your funds are not affected.</div></div><button className="btn btn-ink" onClick={load}>Try again</button></div>}
+        {packs && !packs.length && <div className="card col-span-full p-6 text-sm text-muted">No packs are available on Collector Crypt right now. Check back soon.</div>}
       </div>
     </section>
 
@@ -128,7 +144,7 @@ export function OpenPage() {
       </div> : <div className="card px-5 py-8 text-center text-sm text-muted">No pulls yet. Be the first.</div>}
     </section>
 
-    <Modal open={opening !== null} onClose={close} dismissable={!order || FINAL.includes(order.status)} width="max-w-2xl">
+    <Modal open={opening !== null} onClose={close} dismissable={!order || FINAL.includes(order.status)} width="max-w-2xl" label="Opening your pack">
       {opening !== null && <OpenFlow priceUsd={opening} order={order} onAgain={() => { const p = packs?.find(x => x.priceUsd === opening); close(); if (p) setTimeout(() => open(p), 50); }} onClose={close} />}
     </Modal>
   </>;
@@ -183,6 +199,7 @@ function OpenFlow({ priceUsd, order, onAgain, onClose }: { priceUsd: number; ord
   const step = status === 'complete' ? STEPS.length : STEPS.findIndex(s => s.at.includes(status ?? 'awaiting_payment'));
   const revealed = !!order?.card;
   const failed = status === 'refunded' || status === 'expired' || status === 'review';
+  const hit = !!order && order.valueUsd !== null && order.valueUsd >= order.priceUsd;
   return <div className="grid gap-8 sm:grid-cols-[200px_1fr]">
     <div className="mx-auto w-[170px] sm:w-[200px]">
       {revealed ? <div className="reveal"><Slab card={order!.card!} priceUsd={priceUsd} /></div> : <PackArt priceUsd={priceUsd} className={status && status !== 'awaiting_payment' ? 'shake' : 'float'} />}
@@ -201,13 +218,13 @@ function OpenFlow({ priceUsd, order, onAgain, onClose }: { priceUsd: number; ord
         <div className="grid grid-cols-3 gap-4">
           <Mini label="You paid" value={money(order.totalUsd)} />
           <Mini label="Card value" value={money(order.valueUsd)} tone={order.valueUsd >= order.priceUsd ? 'text-grass' : ''} />
-          <Mini label="Back to you" value={order.rebateUsd === null ? '…' : `+${money(order.rebateUsd)}`} tone="text-grass" />
+          <Mini label="Back to you" value={hit ? 'Not needed' : order.rebateUsd === null ? '…' : `+${money(order.rebateUsd)}`} tone={hit ? 'text-muted' : 'text-grass'} />
         </div>
         {order.rebateUsd !== null && order.valueUsd < order.priceUsd && <div className="mt-5"><RebateBar priceUsd={order.priceUsd} valueUsd={order.valueUsd} rebateUsd={order.rebateUsd} /></div>}
         {status === 'complete' && order.valueUsd >= order.priceUsd && <p className="mt-4 rounded-2xl bg-yellow-soft px-4 py-3 text-sm font-medium">A hit! This card beat the pack price, so no rebate was needed.</p>}
       </div>}
 
-      <p className={`mt-4 text-sm ${status === 'review' ? 'text-red' : 'text-muted'}`}>{status === 'review' ? 'Your payment is safe. The team has been alerted and will finish this order.' : order?.message}</p>
+      {!(status === 'complete' && hit) && <p className={`mt-4 text-sm ${status === 'review' ? 'text-red' : 'text-muted'}`}>{status === 'review' ? 'Your payment is safe. The team has been alerted and will finish this order.' : order?.message}</p>}
 
       <div className="mt-4 flex flex-wrap gap-4 text-xs">
         {([['Payment', order?.paymentSignature], ['Card transfer', order?.nftSignature], ['Rebate', order?.rebateSignature], ['Refund', order?.refundSignature]] as const).filter(([, s]) => s).map(([label, s]) =>

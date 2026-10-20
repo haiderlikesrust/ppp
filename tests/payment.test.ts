@@ -22,7 +22,7 @@ test('payments signed by another key, or unsigned, are rejected', () => {
   const f = fixture();
   assert.throws(() => validateSignedPayment(f.built.transaction, f.built.intent), /signature/);
   const other = fixture();
-  assert.throws(() => validateSignedPayment(f.sign(), other.built.intent), /match|signed/);
+  assert.throws(() => validateSignedPayment(f.sign(), { ...other.built.intent, blockhash: f.built.blockhash }), /match|signed/);
 });
 
 test('a payment for a different amount or recipient is rejected even if signed', () => {
@@ -39,4 +39,14 @@ test('wallets may add compute budget, but not other programs', () => {
   validateSignedPayment(f.sign(withBudget), f.built.intent);
   const drain = new VersionedTransaction(new TransactionMessage({ ...message, instructions: [...message.instructions, SystemProgram.transfer({ fromPubkey: f.user.publicKey, toPubkey: Keypair.generate().publicKey, lamports: 1 })] }).compileToV0Message());
   assert.throws(() => validateSignedPayment(f.sign(drain), f.built.intent), /Unexpected program/);
+});
+
+test('a payment re-signed against a different blockhash is rejected', () => {
+  const f = fixture();
+  const message = TransactionMessage.decompile(f.tx.message);
+  const later = new VersionedTransaction(new TransactionMessage({ ...message, recentBlockhash: Keypair.generate().publicKey.toBase58() }).compileToV0Message());
+  assert.throws(() => validateSignedPayment(f.sign(later), f.built.intent), /changed the payment/);
+  // Orders created before the pin was added carry no blockhash and still validate.
+  const { blockhash: _, ...legacy } = f.built.intent;
+  validateSignedPayment(f.sign(later), legacy);
 });

@@ -24,14 +24,18 @@ export class Pool {
   }
   async reserved() { return Number((await this.db.query<{ total: string }>('SELECT COALESCE(SUM(micros),0)::text AS total FROM reservations WHERE released_at IS NULL')).rows[0].total); }
   async queued() { return Number((await this.db.query<{ total: string }>("SELECT COALESCE(SUM(rebate_micros),0)::text AS total FROM claims WHERE status IN ('approved','queued','paying')")).rows[0].total); }
-  async free() { return (await this.balance()) - (await this.reserved()); }
+  /** Claim payouts sent but not yet confirmed: the cached balance does not reflect them yet. */
+  async inFlight() { return Number((await this.db.query<{ total: string }>("SELECT COALESCE(SUM(rebate_micros),0)::text AS total FROM claims WHERE status='paying'")).rows[0].total); }
+  async free() { return (await this.balance()) - (await this.reserved()) - (await this.inFlight()); }
   async health() { return healthBps((await this.free()) - (await this.queued()), micros(this.settings.current.offsite.targetReserveUsd)); }
 
   /** Callers run inside the coordinator's Serial queue, so check-then-insert cannot race. */
   async reserve(id: string, amount: number) {
     if (amount <= 0) return;
+    // Idempotent: an order that already holds its reservation keeps it.
+    if ((await this.db.query('SELECT 1 FROM reservations WHERE id=$1 AND released_at IS NULL', [id])).rows.length) return;
     if ((await this.free()) < amount) throw new Error('The protection pool is full right now. Try a smaller pack or check back soon.');
-    await this.db.query('INSERT INTO reservations(id,micros,created_at) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING', [id, amount, Date.now()]);
+    await this.db.query('INSERT INTO reservations(id,micros,created_at) VALUES($1,$2,$3) ON CONFLICT(id) DO UPDATE SET micros=EXCLUDED.micros,created_at=EXCLUDED.created_at,released_at=NULL', [id, amount, Date.now()]);
   }
   async release(id: string) { await this.db.query('UPDATE reservations SET released_at=$2 WHERE id=$1 AND released_at IS NULL', [id, Date.now()]); }
 

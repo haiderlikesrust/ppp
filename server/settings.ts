@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { Database } from './db';
 import { DEFAULT_SETTINGS } from '../shared/protection';
@@ -38,3 +39,6 @@ export class SettingsStore {
     this.current = parsed;
   }
 }
+
+/** A short fingerprint of the saved settings, used to refuse saves made from a stale admin page. */
+export const settingsVersion = (settings: Settings) => createHash('sha256').update(JSON.stringify(settings)).digest('hex').slice(0, 16);

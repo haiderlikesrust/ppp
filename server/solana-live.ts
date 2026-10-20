@@ -15,6 +15,8 @@ export class LiveSolana implements Solana {
   readonly live = config.live;
   private supplyCache: { value: bigint; at: number } | null = null;
   constructor(readonly ops: Chain, readonly pool: Chain, readonly rpc: Connection | null) {}
+  /** Read-only until mainnet is enabled with both signers and an RPC: no payment is accepted before that. */
+  get canSpend() { return config.live && !!this.rpc && !!this.ops.signer && !!this.pool.signer; }
   get opsAddress() { return this.ops.address; }
   get poolAddress() { return this.pool.address; }
   get holderMint() { return config.MEMECOIN_MINT || null; }
@@ -103,6 +105,14 @@ export class LiveSolana implements Solana {
       before = last.signature;
     }
     return found;
+  }
+
+  async ccPaymentBySignature(wallet: string, signature: string) {
+    const rpc = this.requireRpc(), usdc = new PublicKey(config.USDC_MINT);
+    const userAta = getAssociatedTokenAddressSync(usdc, new PublicKey(wallet), true).toBase58();
+    const ccAta = getAssociatedTokenAddressSync(usdc, new PublicKey(config.COLLECTOR_CRYPT_PAYMENT_WALLET), true).toBase58();
+    const tx = await rpc.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+    return parseCcPayment(tx, wallet, userAta, ccAta);
   }
 
   async buybackAndBurn(jobId: string, usdcMicros: number, settings: Settings) {

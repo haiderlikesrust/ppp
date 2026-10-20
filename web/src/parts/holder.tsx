@@ -30,6 +30,6 @@ export function CoverageLadder({ mode = 'onsite' }: { mode?: 'onsite' | 'offsite
         </div>;
       })}
     </div>
-    {me.wallet && h?.offsiteCoverageFrom && h.offsiteCoverageFrom > Date.now() && <p className="mt-4 text-xs text-muted">Off-site pulls are covered from {new Date(h.offsiteCoverageFrom).toLocaleString()} (24h after you first connected).</p>}
+    {me.wallet && h?.offsiteCoverageFrom && h.offsiteCoverageFrom > Date.now() && <p className="mt-4 text-xs text-muted">Off-site pulls are covered from {new Date(h.offsiteCoverageFrom).toLocaleString()} ({config?.settings?.offsiteActivationHours}h after you first connected).</p>}
   </div>;
 }

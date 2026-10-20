@@ -10,8 +10,22 @@ export const PACK_PRICES = [25, 50, 100, 500];
 export class CollectorCryptPacks implements PackProvider {
   constructor(readonly client: CollectorCrypt, readonly opts: { connection: Connection | null; signer: Keypair | null; paymentWallet: string; store: PurchaseStore; enabled: boolean; dasRpcUrl: string; maxPackUsd?: number }) {}
 
-  /** Single-card Pokémon machines that are public, open, and in stock (grailshot's filter). */
-  async machines(): Promise<PackMachine[]> {
+  private cache: { at: number; value: Promise<PackMachine[]> } | null = null;
+
+  /**
+   * Single-card Pokémon machines that are public, open, and in stock (grailshot's filter).
+   * Cached for 30s and shared by concurrent callers, so page views do not fan out to Collector
+   * Crypt. A pack that sells out inside that window is caught at purchase time and refunded.
+   */
+  machines(): Promise<PackMachine[]> {
+    if (this.cache && Date.now() - this.cache.at < 30_000) return this.cache.value;
+    const value = this.fetchMachines();
+    this.cache = { at: Date.now(), value };
+    value.catch(() => { if (this.cache?.value === value) this.cache = null; });
+    return value;
+  }
+
+  private async fetchMachines(): Promise<PackMachine[]> {
     const [catalog, status] = await Promise.all([this.client.machines(), this.client.gachaStatus()]);
     if (status.machineStatus !== 'running') return [];
     return catalog

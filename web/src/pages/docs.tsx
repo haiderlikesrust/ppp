@@ -85,10 +85,10 @@ export function DocsPage() {
           <tbody>{tiers.map(t => <tr key={t.id} className="border-t border-line"><td className="py-3 font-semibold">{t.name}</td><td className="num">{share(t.minSupplyPpm)}+</td><td className="num text-grass">{pct(t.onsiteCoverageBps)}</td><td className="num">{pct(t.offsiteCoverageBps)}</td></tr>)}</tbody>
         </table></div>
         <h3>Your lowest balance counts</h3>
-        <p>We record every connected wallet's balance every 15 minutes. Your tier for a pull is your <b>lowest</b> balance over the window that matters, not your highest. Buying just before a pull, or passing one bag between wallets, does not raise your tier.</p>
+        <p>We record every connected wallet's balance every 15 minutes. Your tier for a pull is your <b>lowest</b> balance over the window that matters, not your highest. Buying just before a pull does not raise your tier, and neither does passing one bag between wallets that we have already been watching.</p>
         <ul>
           <li><b>Packs opened here:</b> your balance when you pay{s.onsiteHoldHours > 0 ? ` (and for the ${s.onsiteHoldHours} hours before)` : ''} and again when the card arrives. If it dropped in between, you get the lower tier.</li>
-          <li><b>Packs opened elsewhere:</b> from {s.offsiteHoldHours} hours before the pull until you claim, or from when you first connected if that was later. {s.offsiteActivationHours > 0 ? `Coverage starts ${s.offsiteActivationHours} hours after you first connect your wallet here.` : 'There is no waiting period: you are covered as soon as you connect.'}</li>
+          <li><b>Packs opened elsewhere:</b> from {s.offsiteHoldHours} hours before the pull until you claim, or from when you first connected if that was later. {s.offsiteActivationHours > 0 ? `Coverage starts ${s.offsiteActivationHours} hours after you first connect your wallet here.` : 'There is no waiting period: you are covered as soon as you connect.'} We check your balance again right before paying, so selling below your tier while a claim waits cancels it.</li>
         </ul>
       </Section>
 

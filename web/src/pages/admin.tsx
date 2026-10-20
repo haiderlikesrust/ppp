@@ -6,7 +6,7 @@ import { api, money, pct } from '../api';
 import { useApp } from '../app';
 import { Empty, SectionTitle, packStyle } from '../ui';
 
-type Admin = { settings: Settings; blockers: string[]; problems: string[]; calibration: { generatedAt: string; samples: number; distributions: any[] } | null; review: any[]; jobs: any[]; audit: any[] };
+type Admin = { settings: Settings; version: string; blockers: string[]; problems: string[]; calibration: { generatedAt: string; samples: number; distributions: any[] } | null; review: any[]; jobs: any[]; audit: any[] };
 
 export function AdminPage() {
   const { me, notify, connect, version } = useApp();
@@ -21,7 +21,7 @@ export function AdminPage() {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setForm({ ...form, [key]: value });
   const tier = (i: number, patch: Partial<Settings['tiers'][number]>) => set('tiers', form.tiers.map((t, j) => j === i ? { ...t, ...patch } : t));
   const n = (v: string) => Number(v);
-  async function save() { try { await api('/admin/settings', form, 'PATCH'); notify('Settings saved.'); load(); } catch (e) { notify((e as Error).message); } }
+  async function save() { try { await api('/admin/settings', form, 'PATCH', { 'If-Match': data!.version }); notify('Settings saved.'); load(); } catch (e) { notify((e as Error).message); } }
   async function act(path: string, body: unknown, message: string) { try { await api(path, body); notify(message); load(); } catch (e) { notify((e as Error).message); } }
 
   return <div className="grid gap-6 py-10">

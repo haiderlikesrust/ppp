@@ -37,7 +37,18 @@ export function App() {
 
   const refresh = useCallback(async () => { setMe(await api<Me>('/me')); }, []);
   useEffect(() => { const on = () => setPath(location.pathname); window.addEventListener('popstate', on); return () => window.removeEventListener('popstate', on); }, []);
-  useEffect(() => { refresh().catch(() => {}); api<AppConfig>('/config').then(setConfig).catch(() => {}); }, [refresh]);
+  useEffect(() => {
+    refresh().catch(() => {});
+    // Retry the public config until it loads, so a brief server restart doesn't leave pages blank.
+    let timer: ReturnType<typeof setTimeout>;
+    const loadConfig = () => api<AppConfig>('/config').then(setConfig).catch(() => { timer = setTimeout(loadConfig, 3000); });
+    loadConfig();
+    return () => clearTimeout(timer);
+  }, [refresh]);
+  useEffect(() => {
+    const titles: Record<string, string> = { '/claim': 'Claim a loss', '/pool': 'Pool', '/docs': 'How it works', '/admin': 'Admin' };
+    document.title = titles[path] ? `${titles[path]} · Pull Protection` : 'Pull Protection · Rip packs. Lose less.';
+  }, [path]);
   const notify = useCallback((message: string) => setNotice(message), []);
   // The mobile menu closes on navigation and on Escape.
   useEffect(() => setMenu(false), [path]);
@@ -102,7 +113,7 @@ export function App() {
       </div>
     </footer>
 
-    <Modal open={picker} onClose={() => setPicker(false)}>
+    <Modal open={picker} onClose={() => setPicker(false)} label="Connect your wallet">
       <Logo size={36} />
       <h2 className="mt-4 text-xl font-semibold">Connect your wallet</h2>
       <p className="mt-1 text-sm text-muted">You'll sign a message to prove the wallet is yours. Signing in never approves a transaction.</p>

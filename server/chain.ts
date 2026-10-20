@@ -1,4 +1,4 @@
-import { Connection, Keypair, PublicKey, TransactionMessage, VersionedTransaction, TransactionInstruction, ComputeBudgetProgram } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, TransactionMessage, VersionedTransaction, TransactionInstruction, ComputeBudgetProgram, SystemProgram } from '@solana/web3.js';
 import { AccountLayout, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, NATIVE_MINT, getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction, createBurnCheckedInstruction, getMint } from '@solana/spl-token';
 import bs58 from 'bs58';
 import { MPL_CORE_PROGRAM_ID } from '@metaplex-foundation/mpl-core';
@@ -61,6 +61,8 @@ export class Chain {
     const simulation = await rpc.simulateTransaction(tx, { sigVerify: false, replaceRecentBlockhash: true, accounts: { encoding: 'base64', addresses: addresses.map(a => a.toBase58()) }, commitment: 'confirmed' });
     if (simulation.value.err) throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
     const after = simulation.value.accounts; if (!after || after.length !== addresses.length) throw new Error('Missing simulation account results.');
+    // The wallet itself must stay a plain System-owned account: an `assign` would hand it to another program.
+    if (after[0] && (after[0].owner !== SystemProgram.programId.toBase58() || after[0].data?.[0])) throw new ReviewRequired('Transaction would change who controls the wallet.');
     const deltas = new Map<string, bigint>();
     for (let i = 1; i < addresses.length; i++) {
       const old = before[i]?.data, newBytes = after[i]?.data?.[0] ? Buffer.from(after[i]!.data[0], 'base64') : null;
@@ -169,7 +171,8 @@ export class Chain {
 
   async transferNft(id: string, mint: string, recipient: string, settings: Settings) {
     return this.execute(id, 'nft-transfer', async () => {
-      if (!await this.ownsNft(mint)) throw new ReviewRequired(`The card is not owned by the ${this.label} wallet.`);
+      // Collector Crypt may report the send before our RPC sees it: retry (with backoff) rather than review.
+      if (!await this.ownsNft(mint)) throw new Error(`Waiting for the card to arrive in the ${this.label} wallet.`);
       const { signer, rpc } = this.require(); const { createUmi } = await import('@metaplex-foundation/umi-bundle-defaults'); const { keypairIdentity, publicKey } = await import('@metaplex-foundation/umi'); const umi = createUmi(config.SOLANA_RPC_URL); umi.use(keypairIdentity(umi.eddsa.createKeypairFromSecretKey(signer.secretKey)));
       const info = await rpc.getAccountInfo(new PublicKey(mint)); let builder;
       if (info?.owner.toBase58() === CORE_PROGRAM) { const core = await import('@metaplex-foundation/mpl-core'); umi.use(core.mplCore()); const asset = await core.fetchAsset(umi, mint), collectionKey = core.collectionAddress(asset), collection = collectionKey ? await core.fetchCollection(umi, collectionKey) : undefined; builder = core.transfer(umi, { asset, collection, newOwner: publicKey(recipient) }); }

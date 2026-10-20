@@ -50,6 +50,10 @@ export async function migrate(db: Database) {
     `CREATE INDEX IF NOT EXISTS orders_open ON orders(status) WHERE status NOT IN ('complete','refunded','expired')`,
     `CREATE INDEX IF NOT EXISTS claims_wallet ON claims(wallet, created_at)`,
     `CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at)`,
+    // Added after launch: when a wallet was last active, so balance snapshots keep covering returning holders.
+    `ALTER TABLE wallets ADD COLUMN IF NOT EXISTS last_seen_at BIGINT`,
+    `UPDATE wallets SET last_seen_at=activated_at WHERE last_seen_at IS NULL`,
+    `CREATE INDEX IF NOT EXISTS snapshots_time ON snapshots(taken_at)`,
   ];
   for (const statement of statements) await db.query(statement);
 }

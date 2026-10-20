@@ -7,13 +7,15 @@ import { CoverageLadder } from '../parts/holder';
 import { Empty, SectionTitle, packStyle } from '../ui';
 
 type Claim = { memo: string; status: string; priceUsd: number; valueUsd: number; rebateUsd: number; signature: string | null; createdAt: number };
-const STATUS: Record<string, [string, string]> = { approved: ['Approved', 'bg-blue-soft text-blue'], paying: ['Paying', 'bg-blue-soft text-blue'], queued: ['Queued · cap reached', 'bg-yellow-soft text-ink'], paid: ['Paid', 'bg-grass-soft text-grass'] };
+const STATUS: Record<string, [string, string]> = { approved: ['Approved', 'bg-blue-soft text-blue'], paying: ['Paying', 'bg-blue-soft text-blue'], queued: ['Queued · cap reached', 'bg-yellow-soft text-ink'], paid: ['Paid', 'bg-grass-soft text-grass'], rejected: ['Not paid · holdings dropped', 'bg-red-soft text-red'] };
 
 export function ClaimPage() {
   const { me, config, connect, notify, version } = useApp();
   const [candidates, setCandidates] = useState<ClaimCandidate[] | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [pasted, setPasted] = useState('');
+  const [found, setFound] = useState<ClaimCandidate | null>(null);
 
   const scan = useCallback(async (quiet = false) => {
     if (!me.wallet) return;
@@ -29,10 +31,26 @@ export function ClaimPage() {
     const id = setInterval(() => scan(true), 4000); return () => clearInterval(id);
   }, [claims, scan]);
 
-  async function claim(memo: string) {
-    setBusy(memo);
-    try { await api(`/claims/${memo}`, {}); notify('Claim approved. The rebate is on its way.'); await scan(true); }
+  async function claim(c: ClaimCandidate) {
+    setBusy(c.memo);
+    // Naming the transaction lets the server verify just that one instead of rescanning the wallet.
+    try { await api(`/claims/${c.memo}`, { signature: c.signature }); notify('Claim approved. The rebate is on its way.'); setFound(null); await scan(true); }
     catch (e) { notify((e as Error).message); } finally { setBusy(null); }
+  }
+
+  /** "Can't find a pull?": paste its Solscan link or transaction signature. */
+  async function lookup(event: React.FormEvent) {
+    event.preventDefault();
+    const signature = pasted.trim().split('/').pop()?.split('?')[0] ?? '';
+    if (!signature) return;
+    setBusy('lookup');
+    try {
+      const hit = await api<ClaimCandidate>('/claims/lookup', { signature });
+      // Already listed above: point there instead of showing it twice.
+      if (candidates?.some(c => c.memo === hit.memo)) { setFound(null); notify('That pull is already in the list above.'); }
+      else { setFound(hit); setPasted(''); }
+    }
+    catch (e) { setFound(null); notify((e as Error).message); } finally { setBusy(null); }
   }
 
   const o = config?.settings?.offsite, activation: number = config?.settings?.offsiteActivationHours ?? 0;
@@ -62,8 +80,17 @@ export function ClaimPage() {
     {candidates && <section className="pb-14">
       <SectionTitle title={eligible.length ? `${eligible.length} pull${eligible.length > 1 ? 's' : ''} you can claim` : 'Pulls found in your wallet'} sub={candidates.length ? `${candidates.length} Collector Crypt pack${candidates.length > 1 ? 's' : ''} in the last ${o?.claimWindowDays ?? 7} days.` : undefined} />
       {candidates.length ? <div className="grid gap-3">
-        {[...eligible, ...other].map(c => <ClaimRow key={c.memo} c={c} busy={busy === c.memo} onClaim={() => claim(c.memo)} />)}
+        {[...eligible, ...other].map(c => <ClaimRow key={c.memo} c={c} busy={busy === c.memo} onClaim={() => claim(c)} />)}
       </div> : <Empty title="No pack payments found" text="This wallet has no Collector Crypt pack purchases in the claim window. Packs bought from another wallet have to be claimed from that wallet." />}
+      <form onSubmit={lookup} className="card mt-4 flex flex-wrap items-center gap-3 p-4 sm:px-5">
+        <div className="min-w-0 flex-1 basis-64">
+          <div className="text-sm font-semibold">Can't find a pull?</div>
+          <div className="text-xs text-muted">Paste its Solscan link or transaction signature from your pack purchase.</div>
+        </div>
+        <input className="input min-w-0 flex-[2] basis-64" value={pasted} onChange={e => setPasted(e.target.value)} placeholder="https://solscan.io/tx/…" aria-label="Pack purchase transaction" />
+        <button className="btn btn-ink" disabled={busy === 'lookup' || !pasted.trim()}>{busy === 'lookup' && <Loader2 className="animate-spin" size={15} />}Find it</button>
+      </form>
+      {found && <div className="mt-3"><div className="label mb-2">Found from your link</div><ClaimRow c={found} busy={busy === found.memo} onClaim={() => claim(found)} /></div>}
     </section>}
 
     {claims.length > 0 && <section className="pb-14">

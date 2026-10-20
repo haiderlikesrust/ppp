@@ -31,6 +31,32 @@ export async function signIn(wallet: Wallet) {
   connected = { wallet, account };
 }
 
+/**
+ * After a page refresh the sign-in cookie survives but the in-memory wallet link does not.
+ * Finds the wallet holding the signed-in address again: silently when the wallet has already
+ * approved this site, otherwise with one prompt if a single wallet is installed.
+ */
+export async function ensureSigner(address: string) {
+  if (connected?.account.address === address) return;
+  const candidates = getWallets().get().filter(w => 'standard:connect' in w.features && 'solana:signTransaction' in w.features);
+  for (const wallet of candidates) {
+    let account = wallet.accounts.find(a => a.address === address);
+    if (!account) {
+      try { account = (await (wallet.features['standard:connect'] as any).connect({ silent: true })).accounts.find((a: WalletAccount) => a.address === address); }
+      catch { /* this wallet needs a prompt, or is not the one */ }
+    }
+    if (account) { connected = { wallet, account }; return; }
+  }
+  if (candidates.length === 1) {
+    const result = await (candidates[0].features['standard:connect'] as any).connect();
+    const account = result.accounts.find((a: WalletAccount) => a.address === address);
+    if (!account) throw new Error(`Switch your wallet to ${address.slice(0, 4)}…${address.slice(-4)}, the account you signed in with.`);
+    connected = { wallet: candidates[0], account };
+    return;
+  }
+  throw Object.assign(new Error('Reconnect the wallet you signed in with to sign the payment.'), { reconnect: true });
+}
+
 /** Asks the connected wallet to sign (not send) the payment; the server checks and broadcasts it. */
 export async function signPayment(transactionBase64: string) {
   if (!connected) throw new Error('Reconnect your wallet to sign the payment.');

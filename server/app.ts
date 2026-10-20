@@ -13,8 +13,9 @@ import { audit } from './db';
 import { createServices, startCoordinator, type Services } from './services';
 import { MockPacks, MockSolana } from './mock';
 import { loadCalibration } from './calibration';
-import { settingsSchema } from './settings';
+import { settingsSchema, settingsVersion } from './settings';
 import { settingsProblems } from '../shared/protection';
+import { publicError, redact } from './redact';
 
 const COOKIE = 'pp_session';
 const wallet = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
@@ -41,8 +42,9 @@ export async function createApp(options: { services?: Services; timers?: boolean
   app.setErrorHandler((error, req, reply) => {
     const e = error as Error & { statusCode?: number };
     if (e instanceof z.ZodError) return reply.code(400).send({ error: 'Check the submitted fields.', fields: e.issues.map(i => i.path.join('.')) });
-    if ((e.statusCode ?? 400) >= 500) app.log.error({ message: e.message, path: req.url }, 'Request failed');
-    return reply.code(e.statusCode ?? 400).send({ error: e.message });
+    const { status, message } = publicError(e);
+    if (status >= 500) app.log.error({ message: redact(e.message), path: req.url }, 'Request failed');
+    return reply.code(status).send({ error: message });
   });
 
   const auth = async (req: any, owner = false) => {
@@ -59,10 +61,11 @@ export async function createApp(options: { services?: Services; timers?: boolean
   });
   app.get('/api/config', async () => ({ mode: s.practice ? 'practice' : config.live ? 'mainnet' : 'read-only', mint: s.solana.holderMint, poolAddress: s.solana.poolAddress, opsAddress: s.solana.opsAddress, settings: publicSettings(s) }));
 
-  app.post('/api/auth/challenge', { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } }, async req => { const body = z.object({ wallet }).parse(req.body); return serial.run(() => challenge(db, body.wallet)); });
+  app.post('/api/auth/challenge', { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } }, async req => { const body = z.object({ wallet }).parse(req.body); return challenge(db, body.wallet); });
   app.post('/api/auth/verify', { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = z.object({ id: z.string().uuid(), signature: z.string().max(100) }).parse(req.body);
-    const result = await serial.run(() => verify(db, body.id, body.signature));
+    // Sign-in is a couple of single-statement DB writes; it doesn't wait behind the coordinator queue.
+    const result = await verify(db, body.id, body.signature);
     // The activation snapshot is what later off-site claims measure holdings from.
     await s.holders.snapshot(result.wallet).catch(() => {});
     setSession(reply, result.token);
@@ -85,25 +88,40 @@ export async function createApp(options: { services?: Services; timers?: boolean
   app.post('/api/orders', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);
     const { priceUsd } = z.object({ priceUsd: z.number().int().positive() }).parse(req.body);
-    return serial.run(() => s.orders.create(session.wallet, priceUsd));
+    // Slow provider and RPC calls run outside the queue; only the DB check-and-insert waits in it.
+    return s.orders.create(session.wallet, priceUsd, fn => serial.run(fn));
   });
   app.post('/api/orders/:id/pay', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const { signed } = z.object({ signed: z.string().min(1).max(2_000) }).parse(req.body);
-    return serial.run(() => s.orders.pay(session.wallet, id, signed));
+    return s.orders.pay(session.wallet, id, signed, fn => serial.run(fn));
   });
-  app.get('/api/orders/:id', async req => { const session = await auth(req); const { id } = z.object({ id: z.string().uuid() }).parse(req.params); return s.orders.get(id, session.wallet); });
+  app.post('/api/orders/:id/cancel', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async req => {
+    const session = await auth(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return serial.run(() => s.orders.cancel(session.wallet, id));
+  });
+  app.get('/api/orders/:id', { config: { rateLimit: { max: 240, timeWindow: '1 minute' } } }, async req => { const session = await auth(req); const { id } = z.object({ id: z.string().uuid() }).parse(req.params); return s.orders.get(id, session.wallet); });
   app.get('/api/orders', async req => { const session = await auth(req); return { orders: await s.orders.list(session.wallet) }; });
 
   app.get('/api/claims/scan', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);
     return { candidates: await s.claims.scan(session.wallet, session.activatedAt), claims: await s.claims.list(session.wallet) };
   });
+  const txSignature = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{64,90}$/);
+  // A pull the scan can't find (for example buried under spam transfers), looked up by its own transaction.
+  app.post('/api/claims/lookup', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
+    const session = await auth(req);
+    const { signature } = z.object({ signature: txSignature }).parse(req.body);
+    return s.claims.lookup(session.wallet, session.activatedAt, signature);
+  });
   app.post('/api/claims/:memo', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);
     const { memo } = z.object({ memo: z.string().regex(/^cc-[a-f0-9-]{36}$/) }).parse(req.params);
-    return serial.run(() => s.claims.claim(session.wallet, session.activatedAt, memo));
+    const { signature } = z.object({ signature: txSignature.optional() }).parse(req.body ?? {});
+    // Verification (RPC + Collector Crypt) runs outside the queue; the limit checks and insert run inside it.
+    return s.claims.claim(session.wallet, session.activatedAt, memo, signature, fn => serial.run(fn));
   });
 
   app.get('/api/pool', async () => s.pool.view());
@@ -113,10 +131,11 @@ export async function createApp(options: { services?: Services; timers?: boolean
     await auth(req, true);
     const calibration = await loadCalibration();
     return {
-      settings: s.settings.current, blockers: s.practice ? ['Practice mode: in-memory Solana and a mocked Collector Crypt'] : configBlockers(),
+      settings: s.settings.current, version: settingsVersion(s.settings.current), blockers: s.practice ? ['Practice mode: in-memory Solana and a mocked Collector Crypt'] : configBlockers(),
       problems: settingsProblems(s.settings.current, calibration?.distributions ?? []), calibration,
       review: (await db.query("SELECT id,wallet,status,error,updated_at::text FROM orders WHERE status='review' ORDER BY updated_at DESC LIMIT 50")).rows,
-      jobs: (await db.query("SELECT id,kind,status,error,updated_at::text FROM jobs WHERE status IN ('failed','retryable','submitted','prepared') ORDER BY updated_at DESC LIMIT 50")).rows,
+      // Includes Collector Crypt purchases that were signed but never finished, so none can hide.
+      jobs: (await db.query("SELECT id,kind,status,error,updated_at::text FROM jobs WHERE status IN ('failed','retryable','submitted','prepared') OR (kind='cc-purchase' AND status IN ('signed','ordered') AND updated_at < $1) ORDER BY updated_at DESC LIMIT 50", [Date.now() - 600_000])).rows,
       audit: (await db.query('SELECT id::text,event,data,created_at::text FROM audit ORDER BY id DESC LIMIT 50')).rows,
     };
   });
@@ -125,8 +144,13 @@ export async function createApp(options: { services?: Services; timers?: boolean
     const next = settingsSchema.parse(req.body);
     const problems = settingsProblems(next, (await loadCalibration())?.distributions ?? []);
     if (problems.length) throw Object.assign(new Error(problems.join(' ')), { statusCode: 422 });
-    await serial.run(async () => { await s.settings.save(next); await audit(db, 'settings-updated', { wallet: session.wallet, settings: next }); });
-    return { settings: s.settings.current };
+    await serial.run(async () => {
+      // Refuse a save based on stale settings, e.g. the loss breaker paused a pack after the page loaded.
+      const expected = req.headers['if-match'];
+      if (expected && expected !== settingsVersion(s.settings.current)) throw Object.assign(new Error('Settings changed since you opened this page (for example the automatic brake paused a pack). Reload and try again.'), { statusCode: 409 });
+      await s.settings.save(next); await audit(db, 'settings-updated', { wallet: session.wallet, settings: next });
+    });
+    return { settings: s.settings.current, version: settingsVersion(s.settings.current) };
   });
   app.post('/api/admin/orders/:id/resolve', async req => {
     const session = await auth(req, true);
@@ -165,6 +189,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
     app.post('/api/practice/offsite-pull', async req => {
       const session = await auth(req);
       const { priceUsd, hoursAgo } = z.object({ priceUsd: z.number().int().positive(), hoursAgo: z.number().min(0).max(24 * 30) }).parse(req.body);
+      s.claims.forget(session.wallet);
       return packs.offsitePull(mock, session.wallet, priceUsd, Date.now() - hoursAgo * 3_600_000);
     });
     app.post('/api/practice/fund-pool', async req => {

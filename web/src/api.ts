@@ -1,7 +1,7 @@
-export async function api<T = any>(path: string, body?: unknown, method?: string): Promise<T> {
+export async function api<T = any>(path: string, body?: unknown, method?: string, headers: Record<string, string> = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method: method ?? (body === undefined ? 'GET' : 'POST'),
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin',
   });
@@ -19,3 +19,10 @@ export const ago = (ms: number) => {
   if (s < 60) return `${s}s ago`; if (s < 3600) return `${Math.round(s / 60)}m ago`; if (s < 86_400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86_400)}d ago`;
 };
+
+/** Wallet errors in plain words: a rejected prompt means nothing happened. */
+export function friendly(error: Error & { code?: number }) {
+  const message = error?.message ?? 'Something went wrong.';
+  if (error?.code === 4001 || /reject|declin|denied|cancel+ed|user abort/i.test(message)) return 'You cancelled in your wallet. Nothing was charged.';
+  return message;
+}

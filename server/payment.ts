@@ -7,7 +7,8 @@ export const MEMO_PROGRAM = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDL
 /** Wallets such as Phantom may append Lighthouse balance assertions; they only constrain the signer. */
 const LIGHTHOUSE_PROGRAM = 'L2TExMFKdjpN9kozasaurPtRTUv8KHGp8yjfxEbaHn9';
 
-export type PaymentIntent = { user: string; recipient: string; usdcMint: string; micros: number; memo: string; reference: string };
+/** `blockhash` pins the payment to the one the server issued, so it can't land after the order expired. Older orders lack it. */
+export type PaymentIntent = { user: string; recipient: string; usdcMint: string; micros: number; memo: string; reference: string; blockhash?: string };
 
 /**
  * An unsigned USDC transfer from the user's wallet to OPS, paid for by the user.
@@ -26,12 +27,13 @@ export function buildPayment(intent: Omit<PaymentIntent, 'reference'>, recentBlo
     new TransactionInstruction({ programId: MEMO_PROGRAM, keys: [], data: Buffer.from(intent.memo, 'utf8') }),
   ];
   const tx = new VersionedTransaction(new TransactionMessage({ payerKey: user, recentBlockhash, instructions }).compileToV0Message());
-  return { intent: { ...intent, reference: reference.toBase58() }, transaction: Buffer.from(tx.serialize()).toString('base64'), blockhash: recentBlockhash };
+  return { intent: { ...intent, reference: reference.toBase58(), blockhash: recentBlockhash }, transaction: Buffer.from(tx.serialize()).toString('base64'), blockhash: recentBlockhash };
 }
 
 /** Checks a message pays exactly the intent. Extra instructions may only be compute budget or Lighthouse guards. */
 export function validatePaymentMessage(message: VersionedMessage, intent: PaymentIntent) {
   if (message.addressTableLookups.length) throw new ReviewRequired('Payment must not use address lookup tables.');
+  if (intent.blockhash && message.recentBlockhash !== intent.blockhash) throw new ReviewRequired('Your wallet changed the payment. Please try again; if it keeps happening, try a different wallet.');
   const decoded = TransactionMessage.decompile(message);
   const user = new PublicKey(intent.user), mint = new PublicKey(intent.usdcMint), reference = new PublicKey(intent.reference);
   const signers = message.staticAccountKeys.slice(0, message.header.numRequiredSignatures);

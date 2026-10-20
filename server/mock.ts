@@ -16,6 +16,7 @@ const fakeAddress = () => Keypair.generate().publicKey.toBase58();
  */
 export class MockSolana implements Solana {
   readonly live = false;
+  canSpend = true;
   readonly opsAddress = fakeAddress();
   readonly poolAddress = fakeAddress();
   readonly holderMint = 'PRACTICE';
@@ -71,6 +72,7 @@ export class MockSolana implements Solana {
   }
   async transferNft(jobId: string) { const existing = this.done.get(jobId); if (existing) return existing; const s = fakeSignature(); this.done.set(jobId, s); return s; }
   async scanCcPayments(wallet: string, sinceMs: number) { return (this.ccPayments.get(wallet) ?? []).filter(p => p.blockTime >= sinceMs); }
+  async ccPaymentBySignature(wallet: string, signature: string) { return (this.ccPayments.get(wallet) ?? []).find(p => p.signature === signature) ?? null; }
   async buybackAndBurn(jobId: string, usdcMicros: number) {
     this.move(this.opsAddress, fakeAddress(), BigInt(usdcMicros));
     const signature = this.done.get(jobId) ?? fakeSignature(); this.done.set(jobId, signature);
@@ -104,6 +106,10 @@ export class MockPacks implements PackProvider {
   private records = new Map<string, any>();
   /** Calls to `buy` that return pending before the card arrives. */
   pendingCalls = 1;
+  /** Calls to `buy` that fail like a network outage before Collector Crypt answers again. */
+  outageCalls = 0;
+  /** Calls to `buy` whose pack payment provably never landed (expired or failed on-chain). */
+  unpaidFailures = 0;
   soldOut = new Set<number>();
   constructor(readonly ops: () => string) {}
 
@@ -113,6 +119,8 @@ export class MockPacks implements PackProvider {
     const entry = this.purchases.get(purchaseId) ?? { calls: 0 };
     this.purchases.set(purchaseId, entry);
     if (entry.result) return entry.result;
+    if (this.outageCalls > 0) { this.outageCalls--; throw new TypeError('fetch failed'); }
+    if (this.unpaidFailures > 0) { this.unpaidFailures--; throw new Error('Pack payment expired before landing; no USDC moved.'); }
     if (this.soldOut.has(priceUsd)) throw new Error('That single-card Pokémon pack is not in the public catalog.');
     if (entry.calls++ < this.pendingCalls) return { state: 'pending', message: 'Payment submitted. Resume this order to check confirmation.' };
     const memo = `cc-${randomUUID()}`, signature = fakeSignature();
@@ -133,7 +141,7 @@ export class MockPacks implements PackProvider {
     const memo = `cc-${randomUUID()}`, signature = fakeSignature(), card = this.card(memo, priceUsd);
     solana.ccPayments.set(wallet, [...(solana.ccPayments.get(wallet) ?? []), { memo, signature, priceMicros: priceUsd * 1_000_000, blockTime: pulledAt }]);
     this.records.set(memo, { pack: { status: 'confirmed', wallet, pack_type: `pokemon_${priceUsd}`, transaction_signature: signature, refunded: false }, send: { status: 'confirmed', nft_address: card.mint, to_wallet: wallet, insured_value: card.insuredValueUsd } });
-    return { memo, card };
+    return { memo, signature, card };
   }
   setRecord(memo: string, record: any) { this.records.set(memo, record); }
   async status(memo: string) { return this.records.get(memo) ?? { pack: null, send: null }; }

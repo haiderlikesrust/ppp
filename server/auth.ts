@@ -27,14 +27,19 @@ export async function verify(db: Database, id: string, signature: string) {
 
 /** The first sign-in activates a wallet; off-site coverage counts from that moment. */
 export async function createSession(db: Database, wallet: string) {
-  await db.query('INSERT INTO wallets(wallet,activated_at) VALUES($1,$2) ON CONFLICT(wallet) DO NOTHING', [wallet, Date.now()]);
+  const now = Date.now();
+  await db.query('INSERT INTO wallets(wallet,activated_at,last_seen_at) VALUES($1,$2,$2) ON CONFLICT(wallet) DO UPDATE SET last_seen_at=EXCLUDED.last_seen_at', [wallet, now]);
   const token = randomBytes(32).toString('hex');
-  await db.query('INSERT INTO sessions(id,wallet,expires_at) VALUES($1,$2,$3)', [hashSession(token), wallet, Date.now() + 86_400_000]);
+  await db.query('INSERT INTO sessions(id,wallet,expires_at) VALUES($1,$2,$3)', [hashSession(token), wallet, now + 86_400_000]);
   return { token, wallet };
 }
 
 export async function sessionWallet(db: Database, token?: string) {
   if (!token) return null;
-  const row = (await db.query('SELECT w.wallet,w.activated_at FROM sessions s JOIN wallets w ON w.wallet=s.wallet WHERE s.id=$1 AND s.expires_at>$2', [hashSession(token), Date.now()])).rows[0];
-  return row ? { wallet: row.wallet as string, activatedAt: Number(row.activated_at), owner: !!config.OWNER_WALLET && row.wallet === config.OWNER_WALLET } : null;
+  const now = Date.now();
+  const row = (await db.query('SELECT w.wallet,w.activated_at,w.last_seen_at FROM sessions s JOIN wallets w ON w.wallet=s.wallet WHERE s.id=$1 AND s.expires_at>$2', [hashSession(token), now])).rows[0];
+  if (!row) return null;
+  // Snapshots follow wallets seen in the last 30 days; refresh at most hourly to keep writes low.
+  if (now - Number(row.last_seen_at ?? 0) > 3_600_000) await db.query('UPDATE wallets SET last_seen_at=$2 WHERE wallet=$1', [row.wallet, now]);
+  return { wallet: row.wallet as string, activatedAt: Number(row.activated_at), owner: !!config.OWNER_WALLET && row.wallet === config.OWNER_WALLET };
 }

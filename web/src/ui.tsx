@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { Card } from '../../shared/types';
 import { money } from './api';
@@ -79,15 +79,24 @@ export function RebateBar({ priceUsd, valueUsd, rebateUsd }: { priceUsd: number;
   </div>;
 }
 
-export function Modal({ open, onClose, children, width = 'max-w-md', dismissable = true }: { open: boolean; onClose: () => void; children: ReactNode; width?: string; dismissable?: boolean }) {
+export function Modal({ open, onClose, children, width = 'max-w-md', dismissable = true, label }: { open: boolean; onClose: () => void; children: ReactNode; width?: string; dismissable?: boolean; label?: string }) {
+  const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open || !dismissable) return;
     const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, [open, dismissable, onClose]);
+  // Move focus into the dialog, keep the page behind from scrolling, and give focus back on close.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null, overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    dialog.current?.focus();
+    return () => { document.body.style.overflow = overflow; previous?.focus?.(); };
+  }, [open]);
   if (!open) return null;
   return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/30 p-4 backdrop-blur-sm" onClick={() => dismissable && onClose()}>
-    <div role="dialog" aria-modal="true" className={`card rise relative max-h-[92vh] w-full overflow-auto p-6 shadow-2xl ${width}`} onClick={e => e.stopPropagation()}>
+    <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={label} className={`card rise relative max-h-[92vh] w-full overflow-auto p-6 shadow-2xl outline-none ${width}`} onClick={e => e.stopPropagation()}>
       {dismissable && <button aria-label="Close" className="absolute right-4 top-4 rounded-full p-1 text-muted hover:text-ink" onClick={onClose}><X size={18} /></button>}
       {children}
     </div>

@@ -9,11 +9,12 @@ import { SectionTitle, Stat, packStyle } from '../ui';
 export function PoolPage() {
   const { config, notify, version } = useApp();
   const [pool, setPool] = useState<PoolView | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    const load = () => api<PoolView>('/pool').then(setPool).catch(e => notify(e.message));
+    const load = () => api<PoolView>('/pool').then(p => { setPool(p); setFailed(false); }).catch(() => setFailed(true));
     load(); const id = setInterval(load, 15_000); return () => clearInterval(id);
   }, [notify, version]);
-  if (!pool) return <div className="py-20 text-center text-muted">Loading the pool…</div>;
+  if (!pool) return <div className="py-20 text-center text-muted">{failed ? <>The pool could not be loaded. <button className="font-semibold text-ink underline" onClick={() => location.reload()}>Try again</button></> : "Loading the pool…"}</div>;
   const t = pool.totals, total = Math.max(pool.balanceUsd, 0.01);
   const inflow = [['Creator fees', t.creatorFeesUsd, 'bg-yellow'], ['Pack protection fees', t.feeShareUsd, 'bg-blue']] as const;
   const outflow = [['Rebates on our packs', t.onsiteRebatesUsd, 'bg-grass'], ['Off-site claims', t.offsiteRebatesUsd, 'bg-grass/60']] as const;

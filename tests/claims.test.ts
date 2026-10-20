@@ -116,11 +116,13 @@ test('the per-wallet weekly cap queues claims instead of paying them', async () 
   const { wallet, activatedAt } = await user(s, 20_000, 48);
   const first = losingPull(s, wallet), second = losingPull(s, wallet);
   await s.claims.claim(wallet, activatedAt, first.memo);
+  // A wallet cannot stack up more unpaid claims than its cap could ever pay.
+  await assert.rejects(s.claims.claim(wallet, activatedAt, second.memo), /waiting to be paid/);
+  await s.claims.step();
   await s.claims.claim(wallet, activatedAt, second.memo);
   await s.claims.step();
-  const statuses = (await s.claims.list(wallet)).map(c => c.status).sort();
-  assert.ok(statuses.every(x => x === 'queued' || x === 'paid'));
-  assert.ok(statuses.includes('queued'));
+  const statuses = Object.fromEntries((await s.claims.list(wallet)).map(c => [c.memo, c.status]));
+  assert.deepEqual(statuses, { [first.memo]: 'paid', [second.memo]: 'queued' });
   await s.db.close();
 });
 

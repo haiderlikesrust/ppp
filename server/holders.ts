@@ -23,9 +23,16 @@ export class Holders {
     return { balance, supply, takenAt: at };
   }
 
-  /** Snapshots every wallet that signed in during the last 30 days. Sequential to stay inside RPC limits. */
+  /** The latest snapshot if it is newer than `maxAgeMs`, otherwise a fresh one. For display, not for payouts. */
+  async recent(wallet: string, maxAgeMs = 60_000) {
+    const row = (await this.db.query<{ taken_at: string; balance: string; supply: string }>('SELECT taken_at::text, balance, supply FROM snapshots WHERE wallet=$1 ORDER BY taken_at DESC LIMIT 1', [wallet])).rows[0];
+    if (row && Date.now() - Number(row.taken_at) < maxAgeMs) return { balance: BigInt(row.balance), supply: BigInt(row.supply), takenAt: Number(row.taken_at) };
+    return this.snapshot(wallet);
+  }
+
+  /** Snapshots every wallet active in the last 30 days. Sequential to stay inside RPC limits. */
   async snapshotAll() {
-    const wallets = (await this.db.query<{ wallet: string }>('SELECT DISTINCT wallet FROM sessions WHERE expires_at > $1', [Date.now() - 30 * 86_400_000])).rows;
+    const wallets = (await this.db.query<{ wallet: string }>('SELECT wallet FROM wallets WHERE COALESCE(last_seen_at, activated_at) > $1', [Date.now() - 30 * 86_400_000])).rows;
     let taken = 0;
     for (const { wallet } of wallets) { try { await this.snapshot(wallet); taken++; } catch { /* one RPC failure must not stop the sweep */ } }
     return taken;
@@ -50,10 +57,19 @@ export class Holders {
     return { tier, minBalance, supply, reason: tier ? null : `Your lowest balance in the window was ${(supplyPpm(minBalance, supply) / 10_000).toFixed(3)}% of supply; ${lowest ? `${(lowest.minSupplyPpm / 10_000).toFixed(3)}%` : 'a tier'} is needed.` };
   }
 
-  /** On-site tier at quote time: a fresh snapshot, plus the hold window if one is configured. */
-  async onsiteTier(wallet: string, now = Date.now()) {
-    await this.snapshot(wallet, now);
-    return this.tierFor(wallet, now - this.settings.current.onsiteHoldHours * HOUR, now);
+  /**
+   * On-site tier: a snapshot now (or, for display-only quotes, one from the last minute), plus the
+   * hold window if one is configured. Orders always use a fresh snapshot.
+   */
+  async onsiteTier(wallet: string, options: { fresh?: boolean } = { fresh: true }) {
+    const now = Date.now();
+    const taken = options.fresh ? await this.snapshot(wallet, now) : await this.recent(wallet);
+    return this.tierFor(wallet, Math.min(taken.takenAt, now - this.settings.current.onsiteHoldHours * HOUR), now);
+  }
+
+  /** Keeps 45 days of history (claims look back at most 30 days plus the hold window) and each wallet's latest snapshot. */
+  async prune(keepMs = 45 * 86_400_000) {
+    await this.db.query('DELETE FROM snapshots s WHERE taken_at < $1 AND taken_at < (SELECT MAX(taken_at) FROM snapshots t WHERE t.wallet=s.wallet)', [Date.now() - keepMs]);
   }
 
   /**
@@ -70,7 +86,7 @@ export class Holders {
 
   async view(wallet: string, activatedAt: number): Promise<HolderView> {
     if (!this.solana.holderMint) return { configured: false, balance: '0', supply: '0', ppm: 0, tier: null, activatedAt, offsiteCoverageFrom: null };
-    const { balance, supply } = await this.snapshot(wallet);
+    const { balance, supply } = await this.recent(wallet);
     return { configured: true, balance: balance.toString(), supply: supply.toString(), ppm: supplyPpm(balance, supply), tier: holderTier(balance, supply, this.settings.current.tiers), activatedAt, offsiteCoverageFrom: this.settings.current.offsiteActivationHours > 0 ? activatedAt + this.settings.current.offsiteActivationHours * HOUR : null };
   }
 }

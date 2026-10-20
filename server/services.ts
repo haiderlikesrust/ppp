@@ -58,16 +58,17 @@ export async function createServices(options: { db?: Database; solana?: Solana; 
 /** Background loops. Every financial step runs through the one Serial queue. */
 export function startCoordinator(s: Services, log: (message: string, error?: unknown) => void) {
   const timers: ReturnType<typeof setInterval>[] = [];
-  const every = (ms: number, name: string, task: () => Promise<unknown>) => {
+  const every = (ms: number, name: string, task: () => Promise<unknown>, queued = true) => {
     let busy = false;
     timers.push(setInterval(() => {
       if (busy) return; busy = true;
-      s.serial.run(task).catch(error => log(`${name} failed`, error)).finally(() => { busy = false; });
+      (queued ? s.serial.run(task) : task()).catch(error => log(`${name} failed`, error)).finally(() => { busy = false; });
     }, ms));
   };
   every(2_000, 'orders', () => s.orders.step());
   every(10_000, 'claims', () => s.claims.step());
-  every(15 * 60_000, 'snapshots', () => s.holders.snapshotAll());
+  // One RPC call per active wallet and no money: kept out of the queue so a long sweep never delays payments.
+  every(15 * 60_000, 'snapshots', async () => { await s.holders.snapshotAll(); await s.holders.prune(); }, false);
   every(5 * 60_000, 'treasury', () => s.treasury.run());
   every(5 * 60_000, 'cleanup', async () => { await s.db.query('DELETE FROM sessions WHERE expires_at<$1', [Date.now()]); await s.db.query('DELETE FROM challenges WHERE expires_at<$1', [Date.now()]); });
   return () => timers.forEach(clearInterval);

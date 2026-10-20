@@ -3,6 +3,7 @@ import { PendingOperation } from './jobs';
 import type { CcPayment, PackProvider, Solana } from './ports';
 import type { Holders } from './holders';
 import type { Pool } from './pool';
+import type { Runner } from './orders';
 import type { SettingsStore } from './settings';
 import { ccRecordProblem } from './cc/history';
 import { micros, offsiteCoverageBps, offsiteRebateCapMicros, rebateMicros, usd } from '../shared/protection';
@@ -13,7 +14,7 @@ const until = (at: number | null) => {
   const minutes = Math.max(1, Math.ceil(((at ?? Date.now()) - Date.now()) / 60_000));
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
 };
-type ClaimRow = { memo: string; wallet: string; status: string; value_micros: string; rebate_micros: string; signature: string | null; created_at: string };
+type ClaimRow = { memo: string; wallet: string; status: string; value_micros: string; rebate_micros: string; coverage_bps: number; signature: string | null; created_at: string };
 
 /**
  * Off-site claims for packs opened directly on Collector Crypt. A pull qualifies only when
@@ -36,8 +37,27 @@ export class Claims {
 
   private windowStart() { return Date.now() - this.settings.current.offsite.claimWindowDays * DAY; }
 
+  private paymentCache = new Map<string, { at: number; value: Promise<CcPayment[]> }>();
+
+  /**
+   * The wallet's Collector Crypt payments, cached for 30s: a history scan costs several RPC calls,
+   * and on-chain payments never change once confirmed. `fresh` skips the cache.
+   */
+  private payments(wallet: string, fresh = false) {
+    const cached = this.paymentCache.get(wallet);
+    if (!fresh && cached && Date.now() - cached.at < 30_000) return cached.value;
+    const value = this.solana.scanCcPayments(wallet, this.windowStart());
+    if (this.paymentCache.size > 5_000) this.paymentCache.delete(this.paymentCache.keys().next().value!);
+    this.paymentCache.set(wallet, { at: Date.now(), value });
+    value.catch(() => this.paymentCache.delete(wallet));
+    return value;
+  }
+
+  /** Drops a wallet's cached scan (practice mode adds pulls on demand). */
+  forget(wallet: string) { this.paymentCache.delete(wallet); }
+
   async scan(wallet: string, activatedAt: number): Promise<ClaimCandidate[]> {
-    const payments = await this.solana.scanCcPayments(wallet, this.windowStart());
+    const payments = await this.payments(wallet);
     const health = await this.pool.health(), today = await this.pool.claimsToday(wallet);
     const results: ClaimCandidate[] = [];
     for (const p of payments.sort((a, b) => b.blockTime - a.blockTime)) results.push(await this.evaluate(wallet, activatedAt, p, health, today));
@@ -72,33 +92,76 @@ export class Claims {
     return { ...base, ...known, eligible: true, coverageBps: coverage, rebateUsd: usd(rebate) };
   }
 
-  /** Re-verifies from scratch (never trusts a cached scan) and records the claim. Payment follows in `step`. */
-  async claim(wallet: string, activatedAt: number, memo: string) {
-    const payment = (await this.solana.scanCcPayments(wallet, this.windowStart())).find(p => p.memo === memo);
-    if (!payment) throw Object.assign(new Error('No pack payment from your wallet matches this claim.'), { statusCode: 404 });
+  /** One pull by its payment transaction, for "paste your transaction" when a scan can't find it. */
+  async lookup(wallet: string, activatedAt: number, signature: string) {
+    const payment = await this.solana.ccPaymentBySignature(wallet, signature);
+    if (!payment) throw new Error('That transaction is not a Collector Crypt pack payment made by your wallet.');
+    return this.evaluate(wallet, activatedAt, payment);
+  }
+
+  /**
+   * Re-verifies from scratch (never trusts a cached evaluation) and records the claim; payment
+   * follows in `step`. With `signature` only that one transaction is fetched, otherwise the
+   * (cached) wallet scan is used. The slow verification happens before `run`; limits are
+   * re-checked and the claim inserted inside it, so concurrent requests can't race past them.
+   */
+  async claim(wallet: string, activatedAt: number, memo: string, signature?: string, run: Runner = fn => fn()) {
+    if (!this.solana.canSpend) throw new Error('Off-site claims open at launch.');
+    const payment = signature
+      ? await this.solana.ccPaymentBySignature(wallet, signature)
+      : (await this.payments(wallet)).find(p => p.memo === memo) ?? (await this.payments(wallet, true)).find(p => p.memo === memo);
+    if (!payment || payment.memo !== memo) throw Object.assign(new Error('No pack payment from your wallet matches this claim.'), { statusCode: 404 });
     this.statusCache.delete(memo);
     const candidate = await this.evaluate(wallet, activatedAt, payment);
     if (!candidate.eligible) throw new Error(candidate.reason ?? 'This pull is not eligible.');
-    const now = Date.now();
-    const inserted = await this.db.query('INSERT INTO claims(memo,wallet,status,price_micros,value_micros,coverage_bps,rebate_micros,pulled_at,created_at,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(memo) DO NOTHING RETURNING memo',
-      [memo, wallet, 'approved', payment.priceMicros, micros(candidate.valueUsd!), candidate.coverageBps, micros(candidate.rebateUsd), payment.blockTime, now, JSON.stringify({ signature: payment.signature, nft: candidate.card?.mint })]);
-    if (!inserted.rows.length) throw new Error('This pack has already been claimed.');
-    await audit(this.db, 'claim-approved', { memo, wallet, rebateUsd: candidate.rebateUsd });
-    return { ...candidate, eligible: false, reason: 'Claim approved.', claim: { status: 'approved', rebateUsd: candidate.rebateUsd, signature: null } };
+    const rebate = micros(candidate.rebateUsd);
+    return run(async () => {
+      const o = this.settings.current.offsite, today = await this.pool.claimsToday(wallet);
+      if (o.perWalletDailyClaims > 0 && today.count >= o.perWalletDailyClaims) throw new Error(`Daily limit reached (${o.perWalletDailyClaims} claim${o.perWalletDailyClaims > 1 ? 's' : ''} per 24h). Try again in ${until(today.nextAt)}.`);
+      // Don't let a wallet queue more than its caps could ever pay out; that backlog would never clear.
+      const backlogCap = o.perWalletWeeklyUsd > 0 ? micros(o.perWalletWeeklyUsd) : o.perWalletDailyUsd > 0 ? micros(o.perWalletDailyUsd) : Infinity;
+      const unpaid = Number((await this.db.query<{ total: string }>("SELECT COALESCE(SUM(rebate_micros),0)::text AS total FROM claims WHERE wallet=$1 AND status IN ('approved','queued','paying')", [wallet])).rows[0].total);
+      if (unpaid + rebate > backlogCap) throw new Error('You already have claims waiting to be paid. Claim this one after they pay out.');
+      const now = Date.now();
+      const inserted = await this.db.query('INSERT INTO claims(memo,wallet,status,price_micros,value_micros,coverage_bps,rebate_micros,pulled_at,created_at,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(memo) DO NOTHING RETURNING memo',
+        [memo, wallet, 'approved', payment.priceMicros, micros(candidate.valueUsd!), candidate.coverageBps, rebate, payment.blockTime, now, JSON.stringify({ signature: payment.signature, nft: candidate.card?.mint })]);
+      if (!inserted.rows.length) throw new Error('This pack has already been claimed.');
+      await audit(this.db, 'claim-approved', { memo, wallet, rebateUsd: candidate.rebateUsd });
+      return { ...candidate, eligible: false, reason: 'Claim approved.', claim: { status: 'approved', rebateUsd: candidate.rebateUsd, signature: null } };
+    });
   }
 
-  /** Pays approved claims oldest first, inside the per-wallet, daily and free-balance caps. */
+  /** A claim that waited in the queue is paid only if the wallet still holds the tier it was granted. */
+  private async stillHolds(row: ClaimRow) {
+    await this.holders.snapshot(row.wallet);
+    const check = await this.holders.tierFor(row.wallet, Number(row.created_at), Date.now());
+    return !!check.tier && check.tier.offsiteCoverageBps >= row.coverage_bps;
+  }
+
+  /**
+   * Pays approved claims oldest first, inside the per-wallet, daily and free-balance caps. Wallets at
+   * their cap are skipped for the rest of the pass so they can't hold up everyone behind them.
+   */
   async step() {
-    if (this.settings.current.paused) return 0;
-    const rows = (await this.db.query<ClaimRow>("SELECT * FROM claims WHERE status IN ('approved','queued','paying') ORDER BY created_at LIMIT 50")).rows;
+    const s = this.settings.current;
+    if (s.paused || !s.offsite.enabled || !this.solana.canSpend) return 0;
+    const rows = (await this.db.query<ClaimRow>("SELECT * FROM claims WHERE status IN ('approved','queued','paying') ORDER BY created_at LIMIT 500")).rows;
+    const capped = new Set<string>();
     let paid = 0;
     for (const row of rows) {
       const amount = Number(row.rebate_micros);
       if (row.status !== 'paying') {
+        if (capped.has(row.wallet)) continue;
+        if (Date.now() - Number(row.created_at) > 120_000 && !(await this.stillHolds(row))) {
+          await this.setStatus(row.memo, 'rejected');
+          await audit(this.db, 'claim-rejected', { memo: row.memo, wallet: row.wallet, reason: 'Holdings dropped before payout.' });
+          continue;
+        }
         const room = await this.pool.offsiteRoom(row.wallet);
-        if (amount > room.wallet) { await this.setStatus(row.memo, 'queued'); continue; }
+        if (amount > room.wallet) { await this.setStatus(row.memo, 'queued'); capped.add(row.wallet); continue; }
         if (amount > room.global || amount > room.free) { await this.setStatus(row.memo, 'queued'); break; }
-        await this.setStatus(row.memo, 'paying');
+        // paid_at marks when the payout started, so caps count in-flight payouts against today.
+        await this.db.query("UPDATE claims SET status='paying',paid_at=$2 WHERE memo=$1", [row.memo, Date.now()]);
       }
       try {
         const signature = await this.solana.pay('pool', `claim:${row.memo}`, row.wallet, amount, this.settings.current);

@@ -11,9 +11,10 @@ test('happy path: pay, buy, deliver, auto-rebate, fee split, reservation release
   const { order, transaction } = await s.orders.create(wallet, 25);
   assert.equal(order.status, 'awaiting_payment');
   assert.equal(order.totalUsd, 27.5);
-  assert.equal(await s.pool.reserved(), micros(12.5), '50% of $25 reserved');
+  assert.equal(await s.pool.reserved(), 0, 'nothing is reserved until the user pays');
   assert.ok(VersionedTransaction.deserialize(Buffer.from(transaction, 'base64')));
   await s.orders.pay(wallet, order.id, 'practice');
+  assert.equal(await s.pool.reserved(), micros(12.5), '50% of $25 reserved once paid');
   const done = await settle(s, order.id);
   assert.equal(done.status, 'complete', done.message ?? '');
   assert.ok(done.card);

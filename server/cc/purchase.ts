@@ -34,13 +34,21 @@ export async function buyPack(options: {
     }
     if (!order.paid) {
       const status = (await connection.getSignatureStatuses([order.signature!], { searchTransactionHistory: true })).value[0];
-      if (status?.err) throw new Error('Payment failed on-chain. Inspect the saved signature; this order will not pay again.');
+      // "no USDC moved" is a contract with the caller: this purchase can be retried or refunded safely.
+      if (status?.err) throw new Error('Pack payment failed on-chain; no USDC moved.');
       if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') { order.paid = true; await store.save(order); }
       else {
         const tx = VersionedTransaction.deserialize(Buffer.from(order.signedTransaction, 'base64'));
-        if (!(await connection.isBlockhashValid(tx.message.recentBlockhash, { commitment: 'confirmed' })).value) return pending('Payment expired or is awaiting historical reconciliation. Inspect its signature; do not create a replacement purchase blindly.');
-        await connection.sendRawTransaction(Buffer.from(order.signedTransaction, 'base64'), { skipPreflight: false, maxRetries: 2 });
-        return pending('Payment submitted. Resume this order to check confirmation.');
+        if ((await connection.isBlockhashValid(tx.message.recentBlockhash, { commitment: 'confirmed' })).value) {
+          await connection.sendRawTransaction(Buffer.from(order.signedTransaction, 'base64'), { skipPreflight: false, maxRetries: 2 });
+          return pending('Payment submitted. Resume this order to check confirmation.');
+        }
+        // The blockhash is dead, so the payment can never land later. Chain history decides what happened.
+        const landed = await connection.getTransaction(order.signature!, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+        if (landed && !landed.meta) return pending('Waiting for complete transaction history.');
+        if (landed?.meta?.err) throw new Error('Pack payment failed on-chain; no USDC moved.');
+        if (!landed) throw new Error('Pack payment expired before landing; no USDC moved.');
+        order.paid = true; await store.save(order);
       }
     }
     const status = await client.packStatus(order.memo!);

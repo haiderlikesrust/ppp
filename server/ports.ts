@@ -21,6 +21,8 @@ export interface PackProvider {
 /** Everything the services need from Solana. `LiveSolana` and `MockSolana` implement it. */
 export interface Solana {
   readonly live: boolean;
+  /** True only when real money can move end to end (mainnet on, both wallets and RPC set) or in practice mode. */
+  readonly canSpend: boolean;
   readonly opsAddress: string | null;
   readonly poolAddress: string | null;
   readonly holderMint: string | null;
@@ -35,6 +37,8 @@ export interface Solana {
   pay(from: 'ops' | 'pool', jobId: string, to: string, micros: number, settings: Settings): Promise<string>;
   transferNft(jobId: string, mint: string, to: string, settings: Settings): Promise<string>;
   scanCcPayments(wallet: string, sinceMs: number): Promise<CcPayment[]>;
+  /** One Collector Crypt payment by its transaction signature, only if `wallet` itself made it. */
+  ccPaymentBySignature(wallet: string, signature: string): Promise<CcPayment | null>;
   /** OPS: swaps USDC into our coin and burns it. Returns tokens burned. */
   buybackAndBurn(jobId: string, usdcMicros: number, settings: Settings): Promise<{ tokens: bigint; swapSignature: string; burnSignature: string }>;
   /** POOL: claims pump.fun creator fees and converts them to USDC. */
