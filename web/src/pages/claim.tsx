@@ -40,7 +40,7 @@ export function ClaimPage() {
   const dailyLimit = dailyParts.length ? `Up to ${dailyParts.join(' and ')} a day` : 'No daily limit';
   const eligible = candidates?.filter(c => c.eligible) ?? [], other = candidates?.filter(c => !c.eligible) ?? [];
   return <>
-    <section className="grid items-center gap-10 py-12 md:grid-cols-[1.1fr_1fr] md:py-16">
+    <section className="grid grid-cols-1 items-center gap-10 py-12 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:py-16">
       <div className="rise">
         <span className="chip bg-blue-soft text-blue">Off-site claims</span>
         <h1 className="mt-5 text-4xl font-bold leading-[1] tracking-tight sm:text-5xl md:text-6xl">Opened a pack on<br /><span className="text-blue">Collector Crypt?</span></h1>

@@ -10,6 +10,7 @@ import { PoolPage } from './pages/pool';
 import { AdminPage } from './pages/admin';
 import { DocsPage } from './pages/docs';
 import { PracticeDrawer } from './parts/practice';
+import { ContractAddress } from './parts/contract';
 
 export type Me = { wallet: string | null; owner?: boolean; activatedAt?: number; holder?: HolderView | null };
 export type AppConfig = { mode: 'practice' | 'mainnet' | 'read-only'; mint: string | null; poolAddress: string | null; settings: any };
@@ -66,6 +67,7 @@ export function App() {
         </nav>
         <div className="ml-auto flex items-center gap-1.5">
           {config?.mode === 'practice' && <span className="chip hidden bg-yellow-soft text-ink lg:inline-flex"><FlaskConical size={13} />Practice</span>}
+          <ContractAddress variant="chip" className="hidden xl:flex" />
           {me.wallet
             ? <span className="flex h-9 items-center gap-2 whitespace-nowrap rounded-full border border-line px-3 text-sm" title={me.wallet}><span className={`size-2 rounded-full ${tier ? 'bg-grass' : 'bg-faint'}`} /><span className="num">{short(me.wallet)}</span></span>
             : <button className="btn btn-ink btn-sm" onClick={() => setPicker(true)}><WalletIcon size={15} />Connect</button>}
@@ -77,6 +79,7 @@ export function App() {
       </div>
       {menu && <nav id="mobile-menu" aria-label="Main" className="rise mx-auto max-w-6xl border-t border-line px-4 pb-4 pt-2 md:px-6 lg:hidden">
         {nav.map(([href, label]) => <Link key={href} href={href} className={`flex h-12 items-center justify-between rounded-xl px-3 text-base ${path === href ? 'bg-ink font-semibold text-white' : 'hover:bg-line/50'}`}>{label}{path === href && <span className="size-1.5 rounded-full bg-red" />}</Link>)}
+        <ContractAddress variant="row" className="mt-3 border-t border-line px-3 pt-3" />
         <div className="mt-3 flex items-center gap-3 border-t border-line px-3 pt-4 text-sm">
           {me.wallet ? <>
             <div className="min-w-0 flex-1"><div className="num truncate">{short(me.wallet)}</div><div className="text-xs text-muted">{tier ? `${tier.name} tier` : 'No tier yet'}{config?.mode === 'practice' ? ' · practice wallet' : ''}</div></div>
@@ -91,7 +94,10 @@ export function App() {
 
     <footer className="border-t border-line">
       <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-xs leading-relaxed text-muted sm:flex-row sm:px-6">
-        <div className="flex items-center gap-4"><span className="flex items-center gap-2 font-semibold text-ink"><Logo size={18} />Pull Protection</span><Link href="/docs" className="underline-offset-2 hover:text-ink hover:underline">How it works</Link><Link href="/pool" className="underline-offset-2 hover:text-ink hover:underline">Pool</Link></div>
+        <div className="grid w-full min-w-0 grid-cols-1 content-start gap-2 sm:w-auto sm:flex-1">
+          <div className="flex items-center gap-4"><span className="flex items-center gap-2 font-semibold text-ink"><Logo size={18} />Pull Protection</span><Link href="/docs" className="underline-offset-2 hover:text-ink hover:underline">How it works</Link><Link href="/pool" className="underline-offset-2 hover:text-ink hover:underline">Pool</Link></div>
+          <ContractAddress variant="row" className="max-w-md text-ink" />
+        </div>
         <p className="sm:ml-auto sm:max-w-xl sm:text-right">A discretionary loss rebate for holders, not insurance and not a guarantee. Rebates depend on the pool balance and the published rules. Card values are Collector Crypt insured values at the time of the pull. Not affiliated with Nintendo, The Pokémon Company or Collector Crypt.</p>
       </div>
     </footer>

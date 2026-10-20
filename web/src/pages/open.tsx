@@ -5,6 +5,7 @@ import { ago, api, money, pct, solscan } from '../api';
 import { Link, useApp } from '../app';
 import { hasSigner, signPayment } from '../wallet';
 import { CoverageLadder } from '../parts/holder';
+import { ContractAddress } from '../parts/contract';
 import { Modal, PackArt, RebateBar, SectionTitle, Slab, packStyle } from '../ui';
 
 type Pack = { priceUsd: number; quote: Quote };
@@ -54,7 +55,7 @@ export function OpenPage() {
   const coverage = me.holder?.tier?.onsiteCoverageBps ?? 5_000;
   return <>
     {/* Hero */}
-    <section className="grid items-center gap-10 py-12 md:grid-cols-[1.1fr_1fr] md:py-20">
+    <section className="grid grid-cols-1 items-center gap-10 py-12 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:py-20">
       <div className="rise">
         <span className="chip bg-red-soft text-red"><ShieldCheck size={13} />For holders</span>
         <h1 className="mt-5 text-5xl font-bold leading-[.95] tracking-tight sm:text-6xl md:text-7xl">Rip packs.<br /><span className="text-red">Lose less.</span></h1>
@@ -63,6 +64,7 @@ export function OpenPage() {
           <a href="#packs" className="btn btn-red h-12 px-6">Open a pack<ArrowDown size={16} /></a>
           <Link href="/claim" className="btn btn-ghost h-12 px-6">Opened one elsewhere?</Link>
         </div>
+        <ContractAddress variant="hero" className="mt-6" />
         <div className="mt-10 flex flex-wrap gap-x-10 gap-y-4">
           <HeroStat label="In the pool" value={money(pool?.balanceUsd)} />
           <HeroStat label="Paid back" value={money(pool ? pool.totals.onsiteRebatesUsd + pool.totals.offsiteRebatesUsd : null)} />
