@@ -35,7 +35,7 @@ while (samples.length < target) {
   before = signatures[signatures.length - 1].signature;
   const ok = signatures.filter(s => !s.err).map(s => s.signature);
   for (let i = 0; i < ok.length && samples.length < target; i += 20) {
-    const txs = await rpc.getParsedTransactions(ok.slice(i, i + 20), { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+    const txs = await rpc.getParsedTransactions(ok.slice(i, i + 20), { maxSupportedTransactionVersion: 1, commitment: 'confirmed' });
     for (const tx of txs) {
       const memo = tx?.transaction.message.instructions.map(ix => 'parsed' in ix && ix.program === 'spl-memo' ? CC_OPEN_MEMO.exec(String(ix.parsed))?.[1] : null).find(Boolean);
       if (!memo || seen.has(memo)) continue;

@@ -2,13 +2,28 @@ import { PublicKey, type Connection } from '@solana/web3.js';
 import { NATIVE_MINT, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import bs58 from 'bs58';
 import { config } from './config';
-import type { Chain } from './chain';
+import { MAX_TX_VERSION, type Chain } from './chain';
 import { buildPayment, validatePaymentMessage, validateSignedPayment, type PaymentIntent } from './payment';
 import { parseCcPayment } from './cc/history';
 import { swap } from './swap';
 import { collectCreatorFees, creatorFeesDue } from './fees';
 import type { BuiltPayment, CcPayment, PaymentState, Solana } from './ports';
 import type { Settings } from '../shared/types';
+
+/**
+ * Reads a batch of parsed transactions. If the batch call fails, each one is read on its own and the
+ * unreadable ones are skipped, so one odd transaction (a newer format, a pruned slot) cannot hide the rest.
+ * When every single read fails too, the RPC itself is down: that error is raised, not "nothing found".
+ */
+export async function readParsedTransactions(rpc: Pick<Connection, 'getParsedTransactions' | 'getParsedTransaction'>, signatures: string[]) {
+  const options = { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' as const };
+  try { return await rpc.getParsedTransactions(signatures, options); }
+  catch (error) {
+    const each = await Promise.all(signatures.map(signature => rpc.getParsedTransaction(signature, options).then(tx => tx, () => undefined)));
+    if (each.every(tx => tx === undefined)) throw error;
+    return each.map(tx => tx ?? null);
+  }
+}
 
 /** Turns a failed payment broadcast into one plain sentence; the raw RPC message is kept as `cause` for the logs. */
 export function paymentFailure(message: string) {
@@ -67,7 +82,7 @@ export class LiveSolana implements Solana {
     const signatures = await rpc.getSignaturesForAddress(new PublicKey(intent.reference), { limit: 10 }, 'confirmed');
     for (const s of signatures) {
       if (s.err) continue;
-      const tx = await rpc.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+      const tx = await rpc.getTransaction(s.signature, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' });
       if (!tx?.meta || tx.meta.err) continue;
       try { validatePaymentMessage(tx.transaction.message, intent); return s.signature; } catch { /* a look-alike, not our payment */ }
     }
@@ -85,7 +100,7 @@ export class LiveSolana implements Solana {
     }
     if ((await rpc.isBlockhashValid(payment.blockhash, { commitment: 'confirmed' })).value) return { state: 'pending' };
     // The blockhash is dead, so the payment can never land. Check history once more before expiring.
-    const late = signature ? await rpc.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' }) : null;
+    const late = signature ? await rpc.getTransaction(signature, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' }) : null;
     if (late?.meta && !late.meta.err) return { state: 'confirmed', signature: signature! };
     if (!known && await this.findByReference(payment.intent)) return { state: 'pending' };
     return { state: 'expired' };
@@ -106,7 +121,7 @@ export class LiveSolana implements Solana {
       if (!signatures.length) break;
       const recent = signatures.filter(s => !s.err && (s.blockTime ?? 0) * 1000 >= sinceMs);
       for (let i = 0; i < recent.length; i += 20) {
-        const txs = await rpc.getParsedTransactions(recent.slice(i, i + 20).map(s => s.signature), { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+        const txs = await readParsedTransactions(rpc, recent.slice(i, i + 20).map(s => s.signature));
         for (const tx of txs) { const payment = parseCcPayment(tx, wallet, userAta.toBase58(), ccAta); if (payment) found.push(payment); }
       }
       const last = signatures[signatures.length - 1];
@@ -120,7 +135,7 @@ export class LiveSolana implements Solana {
     const rpc = this.requireRpc(), usdc = new PublicKey(config.USDC_MINT);
     const userAta = getAssociatedTokenAddressSync(usdc, new PublicKey(wallet), true).toBase58();
     const ccAta = getAssociatedTokenAddressSync(usdc, new PublicKey(config.COLLECTOR_CRYPT_PAYMENT_WALLET), true).toBase58();
-    const tx = await rpc.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+    const tx = await rpc.getParsedTransaction(signature, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' });
     return parseCcPayment(tx, wallet, userAta, ccAta);
   }
 

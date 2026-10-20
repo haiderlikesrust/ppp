@@ -3,6 +3,7 @@ import bs58 from 'bs58';
 import { CollectorCrypt, normalizeCard, USDC_MINT, type Card } from './client';
 import type { PurchaseStore } from './store';
 import { validatePackPayment } from './pack-policy';
+import { MAX_TX_VERSION } from '../chain';
 
 export type PurchaseResult = { state: 'pending'; memo?: string; signature?: string; message: string } | { state: 'complete'; memo: string; signature: string; card: Card };
 /** Call again with the SAME order ID to resume. No replacement payment is generated after signing. */
@@ -44,7 +45,7 @@ export async function buyPack(options: {
           return pending('Payment submitted. Resume this order to check confirmation.');
         }
         // The blockhash is dead, so the payment can never land later. Chain history decides what happened.
-        const landed = await connection.getTransaction(order.signature!, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+        const landed = await connection.getTransaction(order.signature!, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' });
         if (landed && !landed.meta) return pending('Waiting for complete transaction history.');
         if (landed?.meta?.err) throw new Error('Pack payment failed on-chain; no USDC moved.');
         if (!landed) throw new Error('Pack payment expired before landing; no USDC moved.');

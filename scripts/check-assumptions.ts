@@ -24,7 +24,7 @@ console.log('1. Collector Crypt pack records for other wallets');
 try {
   const ccAta = getAssociatedTokenAddressSync(new PublicKey(config.USDC_MINT), new PublicKey(config.COLLECTOR_CRYPT_PAYMENT_WALLET), true);
   const signatures = (await rpc.getSignaturesForAddress(ccAta, { limit: 25 }, 'confirmed')).filter(s => !s.err);
-  const txs = await rpc.getParsedTransactions(signatures.map(s => s.signature), { maxSupportedTransactionVersion: 0 });
+  const txs = await rpc.getParsedTransactions(signatures.map(s => s.signature), { maxSupportedTransactionVersion: 1 });
   const memo = txs.flatMap(tx => tx?.transaction.message.instructions ?? []).map(ix => 'parsed' in ix && ix.program === 'spl-memo' ? CC_OPEN_MEMO.exec(String(ix.parsed))?.[1] : null).find(Boolean);
   if (!memo) warn('No recent pack payment found to test with.');
   else {

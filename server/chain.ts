@@ -7,6 +7,8 @@ import { Jobs, PendingOperation, ReviewRequired } from './jobs';
 import type { Settings } from '../shared/types';
 
 export const CORE_PROGRAM = MPL_CORE_PROGRAM_ID;
+/** Newest transaction format we read from chain history. Wallets and apps now send version 1; asking for less makes the RPC refuse. */
+export const MAX_TX_VERSION = 1;
 export type TxPolicy = { kind: 'swap' | 'internal'; inputMint?: string; maxInput?: bigint; minInput?: bigint; outputMint?: string; minOutput?: bigint; allowedPrograms?: string[] };
 
 export function connection(url = config.SOLANA_RPC_URL) {
@@ -105,7 +107,7 @@ export class Chain {
     if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') { await this.jobs.put(id, kind, 'confirmed', data); return data.signature as string; }
     const valid = await rpc.isBlockhashValid(data.blockhash, { commitment: 'confirmed' });
     if (!valid.value && !status) {
-      const landed = await rpc.getTransaction(data.signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+      const landed = await rpc.getTransaction(data.signature, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' });
       if (landed?.meta && !landed.meta.err) { await this.jobs.put(id, kind, 'confirmed', data); return data.signature as string; }
       if (landed && !landed.meta) throw new PendingOperation('Waiting for complete transaction history.');
       await this.jobs.put(id, kind, 'failed', { ...data, automaticRetry: true }, 'Blockhash expired; chain history has no successful transaction.');
@@ -122,7 +124,7 @@ export class Chain {
       if (status?.err && !['confirmed', 'finalized'].includes(status.confirmationStatus ?? '')) throw new PendingOperation('Waiting for the failed transaction to reach confirmation.');
       if (status && !status.err) { if (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') await this.jobs.put(id, job.kind, 'confirmed', job.data); return; }
       if (!status && (await rpc.isBlockhashValid(job.data.blockhash, { commitment: 'confirmed' })).value) throw new PendingOperation('Transaction is still valid; reconciliation must finish first.');
-      const landed = await rpc.getTransaction(job.data.signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+      const landed = await rpc.getTransaction(job.data.signature, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' });
       if (landed && !landed.meta) throw new PendingOperation('Waiting for complete transaction history.');
       if (landed?.meta && !landed.meta.err) { await this.jobs.put(id, job.kind, 'confirmed', job.data); return; }
     }
@@ -131,7 +133,7 @@ export class Chain {
 
   /** Change in this wallet's balance of `mint` caused by a confirmed transaction. */
   async tokenDelta(signature: string, mint: string): Promise<bigint> {
-    const { rpc, signer } = this.require(); const tx = await rpc.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+    const { rpc, signer } = this.require(); const tx = await rpc.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: MAX_TX_VERSION });
     if (!tx || !tx.meta) throw new PendingOperation('Waiting for transaction accounting.'); if (tx.meta.err) throw new ReviewRequired('Transaction failed.');
     if (mint === NATIVE_MINT.toBase58()) { const index = tx.transaction.message.staticAccountKeys.findIndex(k => k.equals(signer.publicKey)); if (index < 0) return 0n; return BigInt(tx.meta.postBalances[index] - tx.meta.preBalances[index] + (index === 0 ? tx.meta.fee : 0)); }
     const total = (rows: any[]): bigint => rows.filter(a => a.owner === this.address && a.mint === mint).reduce((s, a) => s + BigInt(a.uiTokenAmount.amount), 0n);

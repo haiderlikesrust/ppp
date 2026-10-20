@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readParsedTransactions } from '../server/solana-live';
 import { ccRecordProblem, parseCcPayment } from '../server/cc/history';
 
 const wallet = 'BXej5ZYyNU521jd94YvmhCL1nudc2iGBEnRQ2n5o24J4', userAta = 'UserAta1111111111111111111111111111111111111', ccAta = 'D9CEogjHA6CpS12F8St9zpSco7pQKJB5uR1RqDsuzQZk';
@@ -38,4 +39,19 @@ test('Collector Crypt record must match the claimant and the payment', () => {
   assert.match(ccRecordProblem({ ...good, send: null }, wallet, payment)!, /not been delivered/);
   assert.match(ccRecordProblem({ ...good, send: { ...good.send, insured_value: null } }, wallet, payment)!, /insured value/);
   assert.match(ccRecordProblem({ pack: null }, wallet, payment)!, /no record/);
+});
+
+test('one unreadable transaction does not fail a wallet scan, but an RPC outage still does', async () => {
+  const good = { slot: 1 } as any;
+  const versionError = new Error('failed to get transactions: Transaction version (2) is not supported by the requesting client.');
+  const rpc = {
+    getParsedTransactions: async () => { throw versionError; },
+    getParsedTransaction: async (signature: string) => { if (signature === 'odd') throw versionError; return good; },
+  } as any;
+  assert.deepEqual(await readParsedTransactions(rpc, ['a', 'odd', 'b']), [good, null, good]);
+  const down = { getParsedTransactions: async () => { throw new Error('fetch failed'); }, getParsedTransaction: async () => { throw new Error('fetch failed'); } } as any;
+  await assert.rejects(readParsedTransactions(down, ['a', 'b']), /fetch failed/);
+  const options: any[] = [];
+  await readParsedTransactions({ getParsedTransactions: async (_s: string[], o: any) => { options.push(o); return []; } } as any, ['a']);
+  assert.equal(options[0].maxSupportedTransactionVersion, 1, 'asks for version 1 transactions');
 });
