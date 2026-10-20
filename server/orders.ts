@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { atomic, audit, record, type Database } from './db';
 import { Jobs, PendingOperation, ReviewRequired } from './jobs';
+import { redact } from './redact';
 import type { BuiltPayment, PackProvider, Solana } from './ports';
 import type { Holders } from './holders';
 import type { Pool } from './pool';
@@ -21,6 +22,8 @@ const BUYER_MIN_LAMPORTS = 1_000_000n;
 /** Order steps where the OPS wallet signs a transaction and so pays network fees. */
 const OPS_SIGNS: OrderStatus[] = ['paid', 'buying', 'delivering', 'refunding'];
 const MAX_FAILURES = 40;
+/** Consecutive Collector Crypt failures (about 4 minutes with backoff) before an order that never paid it is refunded. */
+const PROVIDER_FAILURES_BEFORE_REFUND = 7;
 const backoffMs = (failures: number) => Math.min(300_000, 2_000 * 2 ** Math.min(failures, 8));
 
 /** Network trouble or a provider 5xx/429: worth retrying, not worth a human's attention yet. */
@@ -155,7 +158,12 @@ export class Orders {
         const e = error as Error, failures = (row.data.failures ?? 0) + 1;
         if (e instanceof PendingOperation) await this.save(row, row.status, { message: e.message, failures: 0, retryAt: 0 });
         else if (e instanceof ReviewRequired || failures >= MAX_FAILURES) { await this.save(row, 'review', { message: e.message, retryAt: 0, reviewFrom: before }, e.message); await audit(this.db, 'order-review', { id: row.id, status: before, error: e.message }); }
-        else await this.save(row, row.status, { message: 'Temporarily delayed. Retrying automatically.', failures, retryAt: Date.now() + backoffMs(failures) }, e.message);
+        else {
+          const message = e instanceof ApiError ? 'Collector Crypt is not responding right now. Retrying automatically; your payment is safe.' : 'Temporarily delayed. Retrying automatically; your payment is safe.';
+          await this.save(row, row.status, { message, failures, retryAt: Date.now() + backoffMs(failures) }, e.message);
+          // The owner sees why in the audit log: on the first failure and whenever the reason changes.
+          if (failures === 1 || e.message !== row.error) await audit(this.db, 'order-delayed', { id: row.id, status: before, failures, error: redact(e.message) });
+        }
       }
       if ((await this.row(row.id))?.status !== before) changed++;
     }
@@ -208,6 +216,11 @@ export class Orders {
           if (!signed && /not in the public catalog|not available|sold out/i.test(message)) return this.save(row, 'refunding', { refundReason: 'The pack sold out before it could be bought.' });
           if (/refunded/i.test(message)) return this.save(row, 'refunding', { refundReason: 'Collector Crypt refunded the pack.' });
           // A provider or RPC hiccup retries with backoff; anything else needs a human.
+          // Collector Crypt keeps failing and none of our USDC reached it: refund now instead of making the buyer wait hours.
+          if (isTransient(error) && (d.failures ?? 0) + 1 >= PROVIDER_FAILURES_BEFORE_REFUND && (await this.sentToProvider(row)) === null) {
+            await audit(this.db, 'order-provider-refund', { id: row.id, failures: (d.failures ?? 0) + 1, error: redact(message) });
+            return this.save(row, 'refunding', { refundReason: 'Collector Crypt could not sell this pack right now.', failures: 0, retryAt: 0 });
+          }
           if (isTransient(error)) throw error;
           throw new ReviewRequired(message);
         }
@@ -267,6 +280,27 @@ export class Orders {
   private async paid(id: string) { return (await this.db.query('SELECT 1 FROM ledger WHERE id=$1', [`order:${id}:sale`])).rows.length > 0; }
 
   /**
+   * The attempt whose pack payment to Collector Crypt was signed (and so may have moved USDC), or null
+   * when none was: attempts known to have moved nothing, and packs Collector Crypt refunded, do not count.
+   */
+  private async sentToProvider(row: Row) {
+    const d = row.data, providerRefunded = /refunded/i.test(row.error ?? '');
+    if (providerRefunded) return null;
+    for (let attempt = 0; attempt <= (d.attempt ?? 0); attempt++) {
+      if ((d.unpaidAttempts ?? []).includes(attempt)) continue;
+      if ((await this.jobs.get(`cc:${row.id}-${attempt}`))?.data?.signature) return attempt;
+    }
+    return null;
+  }
+
+  /** Owner action: skip the backoff wait so a delayed order is tried again on the next pass. */
+  async retryNow(id: string) {
+    const row = await this.row(id);
+    if (!row || !OPEN.includes(row.status)) throw new Error('Only orders that are still in progress can be retried.');
+    await this.save(row, row.status, { retryAt: 0 }, row.error);
+  }
+
+  /**
    * Owner actions for an order in review. Refund only moves money that provably arrived and was
    * not already spent on a pack; Retry resumes where the order stopped, never past an unconfirmed payment.
    */
@@ -277,11 +311,8 @@ export class Orders {
     if (action === 'refund') {
       if (!paid) throw new Error('This payment was never confirmed, so there is nothing to refund. Use Retry to re-check it.');
       if (d.card) throw new Error('The card was bought; use Retry to finish delivery instead of refunding.');
-      const providerRefunded = /refunded/i.test(row.error ?? '');
-      for (let attempt = 0; attempt <= (d.attempt ?? 0); attempt++) {
-        if ((d.unpaidAttempts ?? []).includes(attempt) || providerRefunded) continue;
-        if ((await this.jobs.get(`cc:${row.id}-${attempt}`))?.data?.signature) throw new Error(`A pack payment was sent to Collector Crypt for this order (attempt ${attempt}). Check it on Solscan; use Retry instead of refunding.`);
-      }
+      const sent = await this.sentToProvider(row);
+      if (sent !== null) throw new Error(`A pack payment was sent to Collector Crypt for this order (attempt ${sent}). Check it on Solscan; use Retry instead of refunding.`);
       return this.save(row, 'refunding', { refundReason: 'The order could not be completed.', failures: 0, retryAt: 0 });
     }
     const after = (status?: OrderStatus) => status && !['awaiting_payment', 'paying', 'review'].includes(status);

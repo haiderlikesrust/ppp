@@ -173,3 +173,47 @@ test('failed payment broadcasts become one plain sentence', () => {
   assert.match(paymentFailure('Blockhash not found'), /took too long/);
   assert.doesNotMatch(paymentFailure('Program ComputeBudget111 failed: weird'), /Program|ComputeBudget/);
 });
+
+test('a delayed order tells the owner why once, and Retry now skips the wait', async () => {
+  const s = await setup(), { wallet } = await user(s);
+  const { order } = await s.orders.create(wallet, 25);
+  await s.orders.pay(wallet, order.id, 'practice');
+  s.packs.outageCalls = 2;
+  await s.orders.step(); await s.orders.step(); // payment confirmed, then the first outage
+  await s.orders.retryNow(order.id); await s.orders.step(); // the same outage again
+  const view = await s.orders.get(order.id, wallet);
+  assert.match(view.message ?? '', /payment is safe/);
+  const logged = (await s.db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM audit WHERE event='order-delayed'")).rows[0].n;
+  assert.equal(logged, 1, 'one entry while the reason stays the same');
+  const before = Number((await s.db.query("SELECT data->>'retryAt' AS r FROM orders WHERE id=$1", [order.id])).rows[0].r);
+  assert.ok(before > Date.now(), 'waiting to retry');
+  await s.orders.retryNow(order.id);
+  assert.equal(Number((await s.db.query("SELECT data->>'retryAt' AS r FROM orders WHERE id=$1", [order.id])).rows[0].r), 0);
+  assert.equal((await settle(s, order.id)).status, 'complete');
+  await s.db.close();
+});
+
+test('if Collector Crypt keeps failing before we paid it, the buyer is refunded within minutes', async () => {
+  const s = await setup(), { wallet } = await user(s);
+  const { order } = await s.orders.create(wallet, 50);
+  await s.orders.pay(wallet, order.id, 'practice');
+  s.packs.outageCalls = 100;
+  for (let i = 0; i < 12; i++) { await s.orders.step(); await s.db.query("UPDATE orders SET data=jsonb_set(data,'{retryAt}','0') WHERE id=$1", [order.id]); }
+  const done = await settle(s, order.id);
+  assert.equal(done.status, 'refunded');
+  assert.ok(done.refundSignature);
+  await s.db.close();
+});
+
+test('once a pack payment was sent to Collector Crypt, failures keep retrying instead of refunding', async () => {
+  const s = await setup(), { wallet } = await user(s);
+  const { order } = await s.orders.create(wallet, 50);
+  await s.orders.pay(wallet, order.id, 'practice');
+  await s.orders.step();
+  await s.jobs.put(`cc:${order.id}-0`, 'cc-purchase', 'signed', { signature: 'sent-to-cc' });
+  s.packs.outageCalls = 100;
+  for (let i = 0; i < 12; i++) { await s.orders.step(); await s.db.query("UPDATE orders SET data=jsonb_set(data,'{retryAt}','0') WHERE id=$1", [order.id]); }
+  const order2 = await s.orders.get(order.id);
+  assert.ok(['paid', 'buying'].includes(order2.status), `still trying, not ${order2.status}`);
+  await s.db.close();
+});

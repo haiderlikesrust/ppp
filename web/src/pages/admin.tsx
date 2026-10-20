@@ -7,7 +7,7 @@ import { useApp } from '../app';
 import { Empty, SectionTitle, packStyle } from '../ui';
 
 type Gas = { opsSol: number; poolSol: number; spentTodayUsd: number; opsReady: boolean; opsUsdcAccount: boolean; poolUsdcAccount: boolean };
-type Admin = { settings: Settings; version: string; gas: Gas | null; blockers: string[]; problems: string[]; calibration: { generatedAt: string; samples: number; distributions: any[] } | null; review: any[]; jobs: any[]; audit: any[] };
+type Admin = { settings: Settings; version: string; gas: Gas | null; blockers: string[]; problems: string[]; calibration: { generatedAt: string; samples: number; distributions: any[] } | null; review: any[]; delayed: any[]; jobs: any[]; audit: any[] };
 
 export function AdminPage() {
   const { me, notify, connect, version } = useApp();
@@ -119,6 +119,15 @@ export function AdminPage() {
           {form.tiers.map(t => { const fee = requiredFeeBps(t.onsiteCoverageBps, d.expectedLossRatio, form.poolShareBps); return <td key={t.id} className={fee > form.feeBps ? 'text-red' : 'text-grass'}>{Number.isFinite(fee) ? pct(fee) : '∞'}</td>; })}
         </tr>)}</tbody>
       </table></div> : <p className="text-sm text-muted">No data yet. Run <code className="num rounded bg-bg px-1.5 py-0.5 text-ink">npm run calibrate</code> with a mainnet RPC to measure real pull values before choosing the fee.</p>}
+    </Section>
+
+    <Section title="Delayed orders" sub="Paid orders that hit an error and are retrying on their own, waiting longer each time. After about 3 hours of failures they move to review.">
+      {data.delayed.length ? <div className="divide-y divide-line">{data.delayed.map(o => <div key={o.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
+        <code className="num text-muted">{o.id.slice(0, 8)}</code><span className="chip bg-yellow-soft text-ink">{o.status}</span>
+        <span className="num text-xs text-muted">{o.failures} attempt{o.failures === 1 ? '' : 's'}{Number(o.retry_at) > Date.now() ? ` · next in ${Math.ceil((Number(o.retry_at) - Date.now()) / 1000)}s` : ' · retrying now'}</span>
+        <span className="min-w-0 flex-1 basis-64 break-words text-red">{o.error}</span>
+        <button className="btn btn-ghost btn-sm" onClick={() => act(`/admin/orders/${o.id}/retry-now`, {}, 'Retrying on the next pass.')}>Retry now</button>
+      </div>)}</div> : <p className="text-sm text-muted">Nothing delayed.</p>}
     </Section>
 
     <Section title="Needs review">

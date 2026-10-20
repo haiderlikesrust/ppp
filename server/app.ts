@@ -135,6 +135,8 @@ export async function createApp(options: { services?: Services; timers?: boolean
       settings: s.settings.current, version: settingsVersion(s.settings.current), gas: await s.gas.status().catch(() => null), blockers: s.practice ? ['Practice mode: in-memory Solana and a mocked Collector Crypt'] : configBlockers(),
       problems: settingsProblems(s.settings.current, calibration?.distributions ?? []), calibration,
       review: (await db.query("SELECT id,wallet,status,error,updated_at::text FROM orders WHERE status='review' ORDER BY updated_at DESC LIMIT 50")).rows,
+      // Paid orders that keep failing a step and are waiting to retry, with the reason.
+      delayed: (await db.query("SELECT id,status,error,COALESCE((data->>'failures')::int,0) AS failures,COALESCE((data->>'retryAt')::bigint,0)::text AS retry_at,updated_at::text FROM orders WHERE status IN ('paying','paid','buying','delivering','settling','refunding') AND COALESCE((data->>'failures')::int,0) > 0 ORDER BY updated_at DESC LIMIT 50")).rows.map(r => ({ ...r, error: r.error ? redact(r.error) : null })),
       // Includes Collector Crypt purchases that were signed but never finished, so none can hide.
       jobs: (await db.query("SELECT id,kind,status,error,updated_at::text FROM jobs WHERE status IN ('failed','retryable','submitted','prepared') OR (kind='cc-purchase' AND status IN ('signed','ordered') AND updated_at < $1) ORDER BY updated_at DESC LIMIT 50", [Date.now() - 600_000])).rows,
       audit: (await db.query('SELECT id::text,event,data,created_at::text FROM audit ORDER BY id DESC LIMIT 50')).rows,
@@ -152,6 +154,12 @@ export async function createApp(options: { services?: Services; timers?: boolean
       await s.settings.save(next); await audit(db, 'settings-updated', { wallet: session.wallet, settings: next });
     });
     return { settings: s.settings.current, version: settingsVersion(s.settings.current) };
+  });
+  app.post('/api/admin/orders/:id/retry-now', async req => {
+    const session = await auth(req, true);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    await serial.run(async () => { await s.orders.retryNow(id); await audit(db, 'order-retry-now', { wallet: session.wallet, id }); });
+    return { ok: true };
   });
   app.post('/api/admin/orders/:id/resolve', async req => {
     const session = await auth(req, true);
