@@ -14,11 +14,11 @@ Dokploy's Traefik terminates HTTPS in front of the gateway. The server and datab
 
 1. Push the project to your repository. In Dokploy create a **Docker Compose** service (not Docker Stack/Swarm) from it, branch `main`, and set **Compose Path** to `./compose.dokploy.yaml`. If the repository contains a `pokinsurance/` subfolder, use `pokinsurance/compose.dokploy.yaml` instead.
 2. In **Environment**, paste [`deploy/dokploy.env.example`](../deploy/dokploy.env.example) and fill it in:
-   - `APP_ORIGIN`: your exact public HTTPS origin, e.g. `https://app.example.com`, with no trailing slash.
+   - `APP_ORIGIN`: the exact public HTTPS origin, `https://pullback.cards`, with no trailing slash. Sign-in messages and the origin check on every write use it, so it must match the address people open.
    - `POSTGRES_PASSWORD`: long and alphanumeric only (`openssl rand -hex 32`). Required even before launch.
    - Leave `MAINNET_ENABLED=false` for the first deploy.
 3. Add the wallet keys here when you are ready: `OPS_PRIVATE_KEY` and `POOL_PRIVATE_KEY`, two different wallets, as base58 secret keys or quoted JSON arrays of 64 bytes. They are runtime variables of the **server** container only. No keypair file, build argument or public variable is used.
-4. In **Domains**, add your host, choose service **gateway**, container port **80**, path **/**, and enable **HTTPS / Let's Encrypt**. Point the domain's DNS at the VPS.
+4. In **Domains**, add `pullback.cards`, choose service **gateway**, container port **80**, path **/**, and enable **HTTPS / Let's Encrypt**. Point the domain's DNS at the VPS. Add `packprotection.xyz` (the previous domain) and, if you use it, `www.pullback.cards` the same way: the gateway redirects both to `https://pullback.cards`.
 5. Deploy. In Preview Compose, confirm the gateway has both `app` and `dokploy-network`. Wait for the postgres, server and gateway health checks before opening the domain.
 
 Compose maps each variable explicitly, so the frontend never sees the environment. `.dockerignore` keeps local `.env` files, keys, databases, the `video/` project and test files out of the images.

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { Keypair } from '@solana/web3.js';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
@@ -48,6 +50,17 @@ for (const asset of assets) {
 if (gateway) assert.equal((await fetch(`${base}/assets/does-not-exist.js`)).status, 404, 'Missing assets are 404s, not index.html');
 passed.push('pages and assets');
 
+// The previous domain and www redirect to pullback.cards with the path kept. fetch cannot set Host.
+if (gateway) {
+  for (const host of ['packprotection.xyz', 'www.pullback.cards']) {
+    const response = await new Promise((resolve, reject) => (base.startsWith('https:') ? httpsRequest : httpRequest)(`${base}/claim?from=old`, { headers: { host } }, resolve).on('error', reject).end());
+    response.resume();
+    assert.equal(response.statusCode, 301, host);
+    assert.equal(response.headers.location, 'https://pullback.cards/claim?from=old', host);
+  }
+  passed.push('domain redirects');
+}
+
 // Public API through the gateway.
 const appConfig = await (await fetch(`${base}/api/config`)).json();
 assert.equal(appConfig.mode, 'read-only');
@@ -77,5 +90,5 @@ assert.equal((await fetch(`${base}/api/admin`, { headers: { cookie } })).status,
 assert.equal((await fetch(`${base}/api/claims/scan`, { headers: { cookie } })).status < 500, true, 'Claim scan answers without crashing when no RPC is configured');
 
 console.log(gateway
-  ? 'Production stack: pages, cached assets, security headers, PostgreSQL, origin checks and signed wallet sessions passed.'
+  ? 'Production stack: pages, cached assets, security headers, domain redirects, PostgreSQL, origin checks and signed wallet sessions passed.'
   : 'Production server (direct, no gateway): read-only mode, pages, assets, origin checks, signed wallet sessions and admin lock passed.');

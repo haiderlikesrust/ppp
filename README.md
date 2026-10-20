@@ -1,6 +1,6 @@
 # Pullback
 
-A loss rebate for people who hold our pump.fun coin and open Collector Crypt Pokémon packs.
+Live at [pullback.cards](https://pullback.cards). A loss rebate for people who hold our pump.fun coin and open Collector Crypt Pokémon packs.
 
 - **On-site packs.** You pay the pack price plus a protection fee in one USDC payment. Our OPS wallet buys and opens the pack on Collector Crypt and sends you the card. If the card's insured value is below the pack price, the POOL wallet pays `coverage% × (price − value)` straight away.
 - **Off-site packs.** You connect the wallet that opened a pack on Collector Crypt. We find your own payment on-chain, check Collector Crypt's record of the card it sent you, and pay a smaller share of the loss. You keep the card. Each pack can be claimed once.
