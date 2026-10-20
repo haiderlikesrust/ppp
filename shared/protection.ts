@@ -11,8 +11,8 @@ export const DEFAULT_SETTINGS: Settings = {
   feeBps: 1_000,
   poolShareBps: 5_000,
   tiers: [
-    { id: 't1', name: 'Holder', minSupplyPpm: 1_000, onsiteCoverageBps: 2_500, offsiteCoverageBps: 2_000 },
-    { id: 't2', name: 'Collector', minSupplyPpm: 10_000, onsiteCoverageBps: 5_000, offsiteCoverageBps: 3_500 },
+    { id: 't1', name: 'Shrimp', minSupplyPpm: 1_000, onsiteCoverageBps: 2_500, offsiteCoverageBps: 2_000 },
+    { id: 't2', name: 'Dolphin', minSupplyPpm: 10_000, onsiteCoverageBps: 5_000, offsiteCoverageBps: 3_500 },
     { id: 't3', name: 'Whale', minSupplyPpm: 20_000, onsiteCoverageBps: 10_000, offsiteCoverageBps: 6_000 },
   ],
   maxRebateUsd: 250,
@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS: Settings = {
   offsiteActivationHours: 0,
   offsite: { enabled: true, claimWindowHours: 24, perWalletDailyClaims: 3, perWalletDailyUsd: 25, perWalletWeeklyUsd: 100, dailyPoolBps: 0, targetReserveUsd: 1_000 },
   breaker: { lossRatioBps: 20_000, minPacks: 20, windowDays: 7 },
-  pausedPrices: [],
+  pausedPacks: [],
   creatorFeeBudgetUsdPerDay: 0,
   creatorFeeMinUsd: 2,
   maxPriceImpactBps: 300,
@@ -78,12 +78,12 @@ export function offsiteRebateCapMicros(s: Settings) {
 /** The largest rebate an on-site order can ever cost: coverage of the whole price, capped. */
 export const maxLiability = (priceMicros: number, coverageBps: number, capMicros: number) => Math.min(capMicros, bps(priceMicros, coverageBps));
 
-export function quote(priceUsd: number, tier: HolderTier | null, settings: Settings, poolFreeMicros: number): Quote {
+export function quote(priceUsd: number, tier: HolderTier | null, settings: Settings, poolFreeMicros: number, code = `pokemon_${priceUsd}`): Quote {
   const priceMicros = micros(priceUsd), feeMicros = bps(priceMicros, settings.feeBps);
   const base = { priceMicros, feeMicros, totalMicros: priceMicros + feeMicros, tier };
   const none = (reason: string): Quote => ({ ...base, coverageBps: 0, maxRebateMicros: 0, protected: false, reason });
   if (settings.paused) return none('Protection is paused.');
-  if (settings.pausedPrices.includes(priceUsd)) return none('Protection for this pack is paused.');
+  if (settings.pausedPacks.includes(code)) return none('Protection for this pack is paused.');
   if (!tier) return none('Hold more of the token to qualify for protection.');
   const coverageBps = tier.onsiteCoverageBps, maxRebate = maxLiability(priceMicros, coverageBps, micros(settings.maxRebateUsd));
   if (maxRebate > poolFreeMicros) return none('The protection pool is full right now. Try a smaller pack or check back soon.');

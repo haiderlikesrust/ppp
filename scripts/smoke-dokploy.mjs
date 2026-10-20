@@ -29,7 +29,7 @@ if (gateway) {
   assert.match(homepage.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.match(homepage.headers.get('cache-control') ?? '', /no-cache/, 'index.html is revalidated so deploys show up at once');
 }
-for (const path of ['/claim', '/pool', '/docs', '/admin', '/fonts/space-grotesk-700-v1.woff2']) {
+for (const path of ['/claim', '/pool', '/how-it-works', '/docs', '/admin', '/favicon.png', '/site.webmanifest']) {
   const response = await fetch(base + path);
   assert.equal(response.status, 200, path);
   assert.ok((await response.arrayBuffer()).byteLength, path);

@@ -1,42 +1,76 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { Card } from '../../shared/types';
 import { money } from './api';
+import { useShowcase } from './showcase';
 
-/** Shield split like a capture ball: red top, white bottom, ink band and button. */
+/** A rewind mark in pixels: two chevrons pointing back. Each row lists the filled columns of one chevron. */
+const CHEVRON_ROWS = [[2, 3], [1, 2], [0, 1], [0, 1], [1, 2], [2, 3]];
+const CHEVRONS = [0, 4].flatMap(shift => CHEVRON_ROWS.flatMap((cols, row) => cols.map(col => [col + shift, row] as [number, number])));
 export function Logo({ size = 28 }: { size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-    <path d="M16 2 4 6.5v8.2C4 22.3 9.2 28.3 16 30c6.8-1.7 12-7.7 12-15.3V6.5z" fill="#fff" stroke="#17171c" strokeWidth="2" strokeLinejoin="round" />
-    <path d="M16 2 4 6.5v8.2c0 .4 0 .9.05 1.3h23.9c.05-.4.05-.9.05-1.3V6.5z" fill="#e3350d" stroke="#17171c" strokeWidth="2" strokeLinejoin="round" />
-    <circle cx="16" cy="16" r="4.2" fill="#fff" stroke="#17171c" strokeWidth="2" />
-    <circle cx="16" cy="16" r="1.6" fill="#17171c" />
+  return <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" shapeRendering="crispEdges">
+    <rect width="32" height="32" rx="7" fill="#ffd23f" />
+    {CHEVRONS.map(([col, row]) => <rect key={`${col}-${row}`} x={4 + col * 3} y={7 + row * 3} width="3" height="3" fill="#0d0f13" />)}
   </svg>;
 }
+export function Wordmark({ size = 'text-lg' }: { size?: string }) {
+  return <span className={`pixel ${size} font-bold tracking-[0.06em]`}>PULLBACK</span>;
+}
 
-/** Pack tiers borrow the capture-ball colorways. */
-export const PACK_STYLE: Record<number, { name: string; top: string; bottom: string; band: string; ink: string }> = {
-  25: { name: 'Starter', top: '#e3350d', bottom: '#ffffff', band: '#17171c', ink: '#17171c' },
-  50: { name: 'Great', top: '#2a75bb', bottom: '#ffffff', band: '#e3350d', ink: '#17171c' },
-  100: { name: 'Ultra', top: '#17171c', bottom: '#ffffff', band: '#ffcb05', ink: '#17171c' },
-  500: { name: 'Master', top: '#7b3fe4', bottom: '#ffffff', band: '#f95587', ink: '#17171c' },
+/** Each Collector Crypt machine wears a Pokémon type: card packs by price, watch packs as Steel. */
+export type PackType = 'grass' | 'water' | 'fire' | 'psychic' | 'steel';
+type PackStyle = { name: string; type: PackType; color: string; item: string };
+export const PACKS: Record<string, PackStyle> = {
+  pokemon_25: { name: 'Grass', type: 'grass', color: '#45d483', item: 'graded card' },
+  pokemon_50: { name: 'Water', type: 'water', color: '#4aa3ff', item: 'graded card' },
+  pokemon_100: { name: 'Fire', type: 'fire', color: '#ff8a4c', item: 'graded card' },
+  pokemon_500: { name: 'Psychic', type: 'psychic', color: '#c77dff', item: 'graded card' },
+  ewatch_250: { name: 'Steel', type: 'steel', color: '#9fb0c4', item: 'luxury watch' },
+  ewatch_500: { name: 'Gold', type: 'steel', color: '#e2b85c', item: 'luxury watch' },
 };
-export const packStyle = (price: number) => PACK_STYLE[price] ?? { name: 'Pack', top: '#6c6c78', bottom: '#fff', band: '#17171c', ink: '#17171c' };
+/** Styling by machine code. Records from before codes existed only carry a price, and were Pokémon packs. */
+export const packStyle = (code: string | null | undefined, priceUsd?: number): PackStyle => PACKS[code ?? ''] ?? PACKS[`pokemon_${priceUsd}`] ?? { name: 'Mystery', type: 'psychic', color: '#8a93a3', item: 'collectible' };
+export const isWatch = (code: string | null | undefined) => packStyle(code).type === 'steel';
 
-export function PackArt({ priceUsd, className = '' }: { priceUsd: number; className?: string }) {
-  const s = packStyle(priceUsd);
-  return <div className={`pack ${className}`} style={{ background: `linear-gradient(180deg, ${s.top} 0 54%, ${s.band} 54% 60%, ${s.bottom} 60%)`, border: '2px solid #17171c' }}>
-    <div className="absolute left-1/2 top-[57%] z-[1] grid size-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-[3px] border-ink bg-white">
-      <div className="size-5 rounded-full border-[3px] border-ink bg-white" />
+const ENERGY: Record<PackType, ReactNode> = {
+  grass: <path d="M5 19C5 10.5 10 5.5 19 5c-.5 9-5.5 14-14 14Zm0 0 8-8" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />,
+  water: <path d="M12 3c4.2 5 6.3 8.6 6.3 11.2a6.3 6.3 0 0 1-12.6 0C5.7 11.6 7.8 8 12 3Z" fill="currentColor" />,
+  fire: <path d="M12.2 2.5c.9 3.2 5.3 5.4 5.3 10.6a5.5 5.5 0 0 1-11 0c0-2.3 1-3.9 2.2-5 .3 2 1.3 3.2 2.6 3.7-.7-3.3-.3-6.4.9-9.3Z" fill="currentColor" />,
+  psychic: <><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12Z" fill="none" stroke="currentColor" strokeWidth="2.2" /><circle cx="12" cy="12" r="2.8" fill="currentColor" /></>,
+  steel: <><rect x="8.5" y="1.5" width="7" height="4" rx="1" fill="currentColor" /><rect x="8.5" y="18.5" width="7" height="4" rx="1" fill="currentColor" /><circle cx="12" cy="12" r="6.6" fill="none" stroke="currentColor" strokeWidth="2.2" /><path d="M12 8.6V12l2.6 1.6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></>,
+};
+export function Energy({ type, className = '', style }: { type: PackType; className?: string; style?: CSSProperties }) {
+  return <svg viewBox="0 0 24 24" className={className} style={style} aria-hidden="true">{ENERGY[type]}</svg>;
+}
+
+/** A sealed pack: Collector Crypt's own pack image when it loads, otherwise the drawn booster. */
+export function Booster({ code, priceUsd, className = '', style }: { code?: string; priceUsd: number; className?: string; style?: CSSProperties }) {
+  const image = useShowcase()?.packs[code ?? `pokemon_${priceUsd}`];
+  const [broken, setBroken] = useState(false), [loaded, setLoaded] = useState(false);
+  const p = packStyle(code, priceUsd);
+  if (image && !broken) return <div className={`booster-img ${className}`} style={{ '--type': p.color, ...style } as CSSProperties}>
+    {!loaded && <div aria-hidden="true" className="absolute inset-[12%] animate-pulse rounded-lg bg-surface" />}
+    <img src={image} alt={`${p.name} $${priceUsd} pack`} referrerPolicy="no-referrer" onLoad={() => setLoaded(true)} onError={() => setBroken(true)} className={`aspect-square w-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`} />
+  </div>;
+  return <DrawnBooster p={p} priceUsd={priceUsd} className={className} style={style} />;
+}
+
+/** The drawn booster: crimped foil top and bottom, the type's energy in the middle. */
+function DrawnBooster({ p, priceUsd, className = '', style }: { p: PackStyle; priceUsd: number; className?: string; style?: CSSProperties }) {
+  return <div className={`booster ${className}`} style={{ '--type': p.color, ...style } as CSSProperties}>
+    <div className="booster-shine" />
+    <div className="absolute inset-x-0 top-[12%] z-[1] text-center pixel text-[11px] font-semibold tracking-[0.32em] text-white/85">{p.name.toUpperCase()}</div>
+    <div className="absolute left-1/2 top-[46%] z-[1] grid aspect-square w-[36%] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/95 shadow-[0_6px_18px_-6px_rgb(0_0_0/.5)]">
+      <Energy type={p.type} className="w-[56%]" style={{ color: p.color }} />
     </div>
-    <div className="absolute inset-x-0 top-6 z-[1] text-center text-white">
-      <div className="text-[11px] font-semibold uppercase tracking-[.25em] opacity-80">{s.name}</div>
-      <div className="num mt-1 text-3xl font-semibold">${priceUsd}</div>
+    <div className="absolute inset-x-0 bottom-[11%] z-[1] text-center">
+      <div className="pixel text-[2rem] font-bold leading-none text-white drop-shadow-[0_2px_0_rgb(0_0_0/.25)]">${priceUsd}</div>
+      <div className="mt-1.5 text-[9px] font-semibold uppercase tracking-[0.24em] text-white/70">1 {p.item}</div>
     </div>
-    <div className="absolute inset-x-0 bottom-4 z-[1] text-center text-[10px] font-semibold uppercase tracking-[.2em] text-ink/60">1 graded card</div>
   </div>;
 }
 
-const TYPE_COLORS = ['#e3350d', '#2a75bb', '#ffcb05', '#2f9e4f', '#7b3fe4', '#f95587', '#ee8130', '#6390f0'];
+const TYPE_COLORS = ['#45d483', '#4aa3ff', '#ff8a4c', '#c77dff', '#ffd23f', '#ff5c8a', '#5ee0d0', '#a3a8b5'];
 const hash = (text: string) => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 const typeColor = (name: string) => TYPE_COLORS[hash(name) % TYPE_COLORS.length];
 /** Mixes a hex color toward white (t > 0) or black (t < 0). */
@@ -62,7 +96,7 @@ export function CardArt({ name, set, color }: { name: string; set?: string; colo
   const first = rand(ATTACKS.length), second = (first + 1 + rand(ATTACKS.length - 1)) % ATTACKS.length;
   const damage = [10 + rand(5) * 10, 0]; damage[1] = damage[0] + 30 + rand(8) * 10;
   const sparkles = Array.from({ length: 7 }, () => ({ x: 32 + rand(186), y: 58 + rand(96), r: 3 + rand(4) }));
-  const title = name.length > 13 ? `${name.slice(0, 12)}…` : name, ink = '#17171c';
+  const title = name.length > 13 ? `${name.slice(0, 12)}…` : name, ink = '#14161b';
   const attack = (y: number, dots: number, label: string, dmg: number) => <g>
     {Array.from({ length: dots }, (_, i) => <circle key={i} cx={30 + i * 15} cy={y - 5} r="6.5" fill={color} stroke="#fff" strokeWidth="1.5" />)}
     <text x={30 + dots * 15} y={y} fontSize="13" fontWeight="700" fill={ink}>{label}</text>
@@ -71,7 +105,7 @@ export function CardArt({ name, set, color }: { name: string; set?: string; colo
   </g>;
   return <svg viewBox="0 0 250 350" className="block aspect-[5/7] w-full" role="img" aria-label={`${name} card illustration`}>
     <defs>
-      <linearGradient id={`${id}f`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fae58a" /><stop offset=".5" stopColor="#e2b42a" /><stop offset="1" stopColor="#f7da6a" /></linearGradient>
+      <linearGradient id={`${id}f`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#f2f5f9" /><stop offset=".5" stopColor="#a9b2bf" /><stop offset="1" stopColor="#e6eaf0" /></linearGradient>
       <linearGradient id={`${id}b`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={shade(color, .62)} /><stop offset="1" stopColor={shade(color, .3)} /></linearGradient>
       <radialGradient id={`${id}a`} cx=".5" cy=".45" r=".8"><stop offset="0" stopColor={shade(color, .85)} /><stop offset=".5" stopColor={shade(color, .15)} /><stop offset="1" stopColor={shade(color, -.4)} /></radialGradient>
       <linearGradient id={`${id}h`} x1="0" y1="0" x2="1" y2=".6"><stop offset=".35" stopColor="#fff" stopOpacity="0" /><stop offset=".5" stopColor="#fff" stopOpacity=".6" /><stop offset=".65" stopColor="#fff" stopOpacity="0" /></linearGradient>
@@ -91,8 +125,8 @@ export function CardArt({ name, set, color }: { name: string; set?: string; colo
       {sparkles.map((p, i) => <path key={i} d={star(p.x, p.y, p.r)} fill="#fff" opacity=".9" />)}
       <rect className="card-holo" x="20" y="47" width="210" height="140" fill={`url(#${id}h)`} />
     </g>
-    <rect x="20" y="47" width="210" height="140" fill="none" stroke="#c99f2e" strokeWidth="3" />
-    <rect x="36" y="193" width="178" height="14" rx="7" fill="#f3d669" />
+    <rect x="20" y="47" width="210" height="140" fill="none" stroke="#8d97a6" strokeWidth="3" />
+    <rect x="36" y="193" width="178" height="14" rx="7" fill="#dfe4ea" />
     <text x="125" y="203.5" textAnchor="middle" fontSize="8.5" fontStyle="italic" fill={ink}>{set ?? 'Collector'} · No. {number}</text>
     {attack(232, 1, ATTACKS[first], damage[0])}
     <line x1="24" x2="226" y1="266" y2="266" stroke={ink} strokeOpacity=".15" />
@@ -102,65 +136,90 @@ export function CardArt({ name, set, color }: { name: string; set?: string; colo
   </svg>;
 }
 
-/** A graded slab: red certification label, card window, value underneath. */
-export function Slab({ card, priceUsd, size = 'md' }: { card: Pick<Card, 'name' | 'image' | 'insuredValueUsd' | 'rarity'>; priceUsd?: number; size?: 'sm' | 'md' }) {
+/** A plain watch illustration for watches without a photo (practice mode). Real pulls show Collector Crypt's photo. */
+export function WatchArt({ name, color }: { name: string; color: string }) {
+  return <svg viewBox="0 0 250 350" className="block aspect-[5/7] w-full" role="img" aria-label={`${name} watch illustration`}>
+    <rect width="250" height="350" fill="#14171d" />
+    <rect x="95" y="0" width="60" height="350" rx="8" fill="#22262e" />
+    {Array.from({ length: 9 }, (_, i) => <rect key={i} x="95" y={8 + i * 38} width="60" height="2" fill="#2c313b" />)}
+    <circle cx="125" cy="175" r="78" fill={color} />
+    <circle cx="125" cy="175" r="66" fill="#0f1115" />
+    {Array.from({ length: 12 }, (_, i) => <rect key={i} x="123" y="115" width="4" height={i % 3 ? 7 : 13} fill="#e9edf2" transform={`rotate(${i * 30} 125 175)`} />)}
+    <rect x="123" y="132" width="4" height="46" rx="2" fill="#e9edf2" transform="rotate(-55 125 175)" />
+    <rect x="123.5" y="122" width="3" height="56" rx="1.5" fill={color} transform="rotate(70 125 175)" />
+    <circle cx="125" cy="175" r="5" fill="#e9edf2" />
+    <rect x="200" y="167" width="9" height="16" rx="2" fill={color} />
+  </svg>;
+}
+
+/** A graded slab: dark case, accent label with name and grade, item window, value underneath. */
+export function Slab({ card, priceUsd, size = 'md', watch = false }: { card: Pick<Card, 'name' | 'image' | 'insuredValueUsd' | 'rarity'>; priceUsd?: number; size?: 'sm' | 'md'; watch?: boolean }) {
   const [name, set, grade] = card.name.split(' · ');
   const color = typeColor(name ?? card.name), hit = priceUsd !== undefined && (card.insuredValueUsd ?? 0) >= priceUsd;
   const small = size === 'sm';
   return <div className="slab w-full">
-    <div className={`flex items-center justify-between rounded-md border-2 border-red bg-white ${small ? 'px-1.5 py-0.5' : 'px-2 py-1'}`}>
+    <div className={`flex items-center justify-between gap-2 rounded-[5px] bg-volt text-night ${small ? 'px-1.5 py-0.5' : 'px-2 py-1'}`}>
       <div className="min-w-0">
-        <div className={`truncate font-semibold ${small ? 'text-[9px]' : 'text-[11px]'}`}>{name}</div>
-        {!small && <div className="truncate text-[9px] text-muted">{set ?? card.rarity}</div>}
+        <div className={`pixel truncate font-semibold ${small ? 'text-[9px]' : 'text-[11px]'}`}>{name}</div>
+        {!small && <div className="truncate text-[9px] opacity-70">{set ?? card.rarity}</div>}
       </div>
-      <div className={`num shrink-0 font-semibold text-red ${small ? 'text-[9px]' : 'text-xs'}`}>{grade?.replace('PSA ', 'PSA ') ?? card.rarity}</div>
+      <div className={`pixel shrink-0 font-bold ${small ? 'text-[9px]' : 'text-xs'}`}>{grade ?? card.rarity}</div>
     </div>
-    <div className="mt-1.5 overflow-hidden rounded-lg border border-line">
-      {card.image ? <img src={card.image} alt={card.name} referrerPolicy="no-referrer" className="aspect-[5/7] w-full object-cover" />
-        : <div className="relative">
-          <CardArt name={name ?? card.name} set={set} color={color} />
-          {hit && <div className="absolute bottom-1.5 right-1.5 rounded-full bg-yellow px-1.5 text-[9px] font-bold">HIT</div>}
-        </div>}
+    <div className="relative mt-1.5 overflow-hidden rounded-[6px] border border-line">
+      {card.image ? <img src={card.image} alt={card.name} referrerPolicy="no-referrer" className="aspect-[5/7] w-full object-cover" /> : watch ? <WatchArt name={name ?? card.name} color={color} /> : <CardArt name={name ?? card.name} set={set} color={color} />}
+      {hit && <span className="tag absolute bottom-1.5 right-1.5 bg-volt text-night">Hit</span>}
     </div>
-    {!small && <div className="num mt-1.5 text-center text-sm font-semibold">{money(card.insuredValueUsd)}</div>}
+    {!small && <div className="pixel num mt-1.5 text-center text-sm">{money(card.insuredValueUsd)}</div>}
   </div>;
 }
 
-/** Price split into what the card is worth, what comes back, and what is lost. */
+/** The pack price split into what the card is worth, what comes back, and what is lost. */
 export function RebateBar({ priceUsd, valueUsd, rebateUsd }: { priceUsd: number; valueUsd: number; rebateUsd: number }) {
   const value = Math.min(valueUsd, priceUsd), pct = (n: number) => `${Math.max(0, n / priceUsd * 100)}%`;
   return <div>
-    <div className="flex h-3 overflow-hidden rounded-full bg-red-soft">
-      <div className="bg-ink" style={{ width: pct(value) }} />
-      <div className="bg-grass" style={{ width: pct(rebateUsd) }} />
+    <div className="flex h-2.5 overflow-hidden rounded-[3px] bg-loss-soft">
+      <div className="bg-ink/80" style={{ width: pct(value) }} />
+      <div className="bg-gain" style={{ width: pct(rebateUsd) }} />
     </div>
     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-      <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-ink" />Card {money(valueUsd)}</span>
-      <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-grass" />Back to you {money(rebateUsd)}</span>
-      <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-red-soft ring-1 ring-red/30" />Not covered {money(Math.max(0, priceUsd - value - rebateUsd))}</span>
+      <span className="flex items-center gap-1.5"><i className="size-2 bg-ink/80" />Card {money(valueUsd)}</span>
+      <span className="flex items-center gap-1.5"><i className="size-2 bg-gain" />Back to you {money(rebateUsd)}</span>
+      <span className="flex items-center gap-1.5"><i className="size-2 bg-loss/40" />Not covered {money(Math.max(0, priceUsd - value - rebateUsd))}</span>
     </div>
   </div>;
 }
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** A dialog that keeps keyboard focus inside and makes the page behind it inert until it closes. */
 export function Modal({ open, onClose, children, width = 'max-w-md', dismissable = true, label }: { open: boolean; onClose: () => void; children: ReactNode; width?: string; dismissable?: boolean; label?: string }) {
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!open || !dismissable) return;
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    if (!open) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && dismissable) onClose();
+      if (e.key !== 'Tab' || !dialog.current) return;
+      const items = [...dialog.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, [open, dismissable, onClose]);
-  // Move focus into the dialog, keep the page behind from scrolling, and give focus back on close.
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null, overflow = document.body.style.overflow;
+    const chrome = [...document.querySelectorAll<HTMLElement>('[data-app-chrome]')];
     document.body.style.overflow = 'hidden';
+    chrome.forEach(el => { el.inert = true; });
     dialog.current?.focus();
-    return () => { document.body.style.overflow = overflow; previous?.focus?.(); };
+    return () => { document.body.style.overflow = overflow; chrome.forEach(el => { el.inert = false; }); previous?.focus?.(); };
   }, [open]);
   if (!open) return null;
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/30 p-4 backdrop-blur-sm" onClick={() => dismissable && onClose()}>
-    <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={label} className={`card rise relative max-h-[92vh] w-full overflow-auto p-6 shadow-2xl outline-none ${width}`} onClick={e => e.stopPropagation()}>
-      {dismissable && <button aria-label="Close" className="absolute right-4 top-4 rounded-full p-1 text-muted hover:text-ink" onClick={onClose}><X size={18} /></button>}
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => dismissable && onClose()}>
+    <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={label} className={`card enter relative max-h-[92vh] w-full overflow-auto border-t-2 border-t-volt p-6 shadow-2xl outline-none ${width}`} onClick={e => e.stopPropagation()}>
+      {dismissable && <button aria-label="Close" className="absolute right-3 top-3 rounded-md p-1.5 text-muted hover:bg-raised hover:text-ink" onClick={onClose}><X size={18} /></button>}
       {children}
     </div>
   </div>;
@@ -169,25 +228,25 @@ export function Modal({ open, onClose, children, width = 'max-w-md', dismissable
 export function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   useEffect(() => { if (!message) return; const t = setTimeout(onClose, 6000); return () => clearTimeout(t); }, [message, onClose]);
   if (!message) return null;
-  return <div role="status" className="rise fixed bottom-6 left-1/2 z-[60] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-full bg-ink py-2.5 pl-5 pr-3 text-sm text-white shadow-xl">
-    <span>{message}</span><button aria-label="Dismiss" className="rounded-full p-1 opacity-70 hover:opacity-100" onClick={onClose}><X size={15} /></button>
+  return <div role="status" className="enter fixed bottom-5 left-4 right-4 z-[60] flex items-center gap-3 rounded-lg border border-line border-l-4 border-l-volt bg-raised py-3 pl-4 pr-2 text-sm shadow-2xl sm:left-6 sm:right-auto sm:max-w-md">
+    <span className="min-w-0 flex-1">{message}</span><button aria-label="Dismiss" className="rounded-md p-1 text-muted hover:text-ink" onClick={onClose}><X size={15} /></button>
   </div>;
 }
 
-export function Stat({ label, value, tone, hint }: { label: string; value: ReactNode; tone?: 'grass' | 'red' | 'blue'; hint?: string }) {
-  return <div>
+export function Stat({ label, value, tone, hint }: { label: string; value: ReactNode; tone?: 'gain' | 'loss' | 'water'; hint?: string }) {
+  return <div className="min-w-0">
     <div className="label">{label}</div>
-    <div className={`num mt-1 text-2xl font-semibold ${tone === 'grass' ? 'text-grass' : tone === 'red' ? 'text-red' : tone === 'blue' ? 'text-blue' : ''}`}>{value}</div>
+    <div className={`pixel num mt-1 truncate text-lg sm:text-xl ${tone === 'gain' ? 'text-gain' : tone === 'loss' ? 'text-loss' : tone === 'water' ? 'text-water' : ''}`}>{value}</div>
     {hint && <div className="mt-0.5 text-xs text-muted">{hint}</div>}
   </div>;
 }
 
 export function SectionTitle({ title, sub, action }: { title: string; sub?: string; action?: ReactNode }) {
   return <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-    <div><h2 className="text-2xl font-semibold tracking-tight">{title}</h2>{sub && <p className="mt-1 text-sm text-muted">{sub}</p>}</div>{action}
+    <div><h2 className="pixel flex items-center gap-2.5 text-2xl font-semibold"><i className="size-2.5 bg-volt" />{title}</h2>{sub && <p className="mt-1.5 text-sm text-muted">{sub}</p>}</div>{action}
   </div>;
 }
 
 export function Empty({ title, text, action }: { title: string; text: string; action?: ReactNode }) {
-  return <div className="card grid place-items-center gap-2 px-6 py-12 text-center"><Logo size={36} /><h3 className="mt-2 font-semibold">{title}</h3><p className="max-w-sm text-sm text-muted">{text}</p>{action && <div className="mt-2">{action}</div>}</div>;
+  return <div className="card grid place-items-center gap-2 px-6 py-12 text-center"><Logo size={34} /><h3 className="pixel mt-2 text-lg">{title}</h3><p className="max-w-sm text-sm text-muted">{text}</p>{action && <div className="mt-2">{action}</div>}</div>;
 }

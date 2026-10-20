@@ -7,6 +7,19 @@ import { api } from './api';
 const SIGN_IN = ['standard:connect', 'solana:signMessage'];
 type Connected = { wallet: Wallet; account: WalletAccount };
 let connected: Connected | null = null;
+let stopWatching: (() => void) | null = null;
+let onSwitch: (() => void) | null = null;
+/** Called when the wallet switches away from the signed-in account (e.g. a different account picked in Phantom). */
+export const onAccountSwitch = (handler: () => void) => { onSwitch = handler; };
+
+function link(wallet: Wallet, account: WalletAccount) {
+  connected = { wallet, account };
+  stopWatching?.(); stopWatching = null;
+  const events = wallet.features['standard:events'] as { on?: (event: 'change', listener: (props: { accounts?: readonly WalletAccount[] }) => void) => () => void } | undefined;
+  stopWatching = events?.on?.('change', props => {
+    if (props.accounts && !props.accounts.some(a => a.address === account.address)) { forget(); onSwitch?.(); }
+  }) ?? null;
+}
 
 /** Solana wallets that can sign in and sign transactions (Phantom, Solflare, Backpack…). */
 export function useWallets() {
@@ -28,7 +41,7 @@ export async function signIn(wallet: Wallet) {
   const challenge = await api<{ id: string; message: string }>('/auth/challenge', { wallet: account.address });
   const [signed] = await (wallet.features['solana:signMessage'] as any).signMessage({ account, message: new TextEncoder().encode(challenge.message) });
   await api('/auth/verify', { id: challenge.id, signature: bs58.encode(signed.signature) });
-  connected = { wallet, account };
+  link(wallet, account);
 }
 
 /**
@@ -45,13 +58,13 @@ export async function ensureSigner(address: string) {
       try { account = (await (wallet.features['standard:connect'] as any).connect({ silent: true })).accounts.find((a: WalletAccount) => a.address === address); }
       catch { /* this wallet needs a prompt, or is not the one */ }
     }
-    if (account) { connected = { wallet, account }; return; }
+    if (account) { link(wallet, account); return; }
   }
   if (candidates.length === 1) {
     const result = await (candidates[0].features['standard:connect'] as any).connect();
     const account = result.accounts.find((a: WalletAccount) => a.address === address);
     if (!account) throw new Error(`Switch your wallet to ${address.slice(0, 4)}…${address.slice(-4)}, the account you signed in with.`);
-    connected = { wallet: candidates[0], account };
+    link(candidates[0], account);
     return;
   }
   throw Object.assign(new Error('Reconnect the wallet you signed in with to sign the payment.'), { reconnect: true });
@@ -69,4 +82,4 @@ export async function signPayment(transactionBase64: string) {
 }
 
 export const hasSigner = () => !!connected;
-export const forget = () => { connected = null; };
+export const forget = () => { connected = null; stopWatching?.(); stopWatching = null; };

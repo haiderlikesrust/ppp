@@ -16,7 +16,7 @@ export const settingsSchema: z.ZodType<Settings> = z.object({
   offsiteActivationHours: z.number().finite().min(0).max(24 * 30),
   offsite: z.object({ enabled: z.boolean(), claimWindowHours: z.number().int().min(1).max(24 * 30), perWalletDailyClaims: z.number().int().min(0).max(1_000), perWalletDailyUsd: z.number().finite().min(0).max(100_000), perWalletWeeklyUsd: z.number().finite().min(0).max(100_000), dailyPoolBps: bps, targetReserveUsd: z.number().finite().min(0).max(10_000_000) }),
   breaker: z.object({ lossRatioBps: z.number().int().min(0).max(1_000_000), minPacks: z.number().int().min(1).max(10_000), windowDays: z.number().int().min(1).max(90) }),
-  pausedPrices: z.array(z.number().int().positive()).max(32),
+  pausedPacks: z.array(z.string().min(1).max(40)).max(64),
   creatorFeeBudgetUsdPerDay: z.number().finite().min(0).max(10_000_000),
   creatorFeeMinUsd: z.number().finite().min(0).max(100_000),
   maxPriceImpactBps: z.number().int().min(10).max(5_000),
@@ -32,13 +32,21 @@ export const settingsSchema: z.ZodType<Settings> = z.object({
   if (s.gas.poolMinSol < s.gasReserveSol) ctx.addIssue({ code: 'custom', path: ['gas', 'poolMinSol'], message: 'POOL minimum must be at least the gas reserve.' });
 });
 
+/** Earlier default tier names, renamed on load. Names an owner typed themselves are left alone. */
+const RENAMED_TIERS: Record<string, string> = { Holder: 'Shrimp', Trainer: 'Shrimp', Collector: 'Dolphin', 'Gym Leader': 'Dolphin', Champion: 'Whale' };
+
 export class SettingsStore {
   current: Settings = DEFAULT_SETTINGS;
   constructor(readonly db: Database) {}
   async load() {
     const row = (await this.db.query('SELECT data FROM settings WHERE id=1')).rows[0];
     // New fields added in later versions fall back to their defaults.
-    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker }, gas: { ...DEFAULT_SETTINGS.gas, ...row.data.gas } }) : DEFAULT_SETTINGS;
+    // Paused prices from before pack codes existed were all Pokémon packs.
+    const legacy = {
+      ...(row && !row.data.pausedPacks && Array.isArray(row.data.pausedPrices) ? { pausedPacks: row.data.pausedPrices.map((p: number) => `pokemon_${p}`) } : {}),
+      ...(row && Array.isArray(row.data.tiers) ? { tiers: row.data.tiers.map((t: any) => RENAMED_TIERS[t?.name] ? { ...t, name: RENAMED_TIERS[t.name] } : t) } : {}),
+    };
+    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, ...legacy, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker }, gas: { ...DEFAULT_SETTINGS.gas, ...row.data.gas } }) : DEFAULT_SETTINGS;
     return this.current;
   }
   async save(settings: Settings) {

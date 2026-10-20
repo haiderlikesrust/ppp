@@ -11,7 +11,7 @@ export async function challenge(db: Database, wallet: string) {
   new PublicKey(wallet);
   const id = randomUUID(), now = Date.now(), expiresAt = now + 300_000;
   const origin = new URL(config.APP_ORIGIN);
-  const message = `${origin.host} wants you to sign in with your Solana account:\n${wallet}\n\nSign in to Pull Protection. This does not authorize a transaction.\n\nURI: ${origin.origin}\nVersion: 1\nChain ID: solana:mainnet\nNonce: ${randomBytes(16).toString('hex')}\nIssued At: ${new Date(now).toISOString()}\nExpiration Time: ${new Date(expiresAt).toISOString()}`;
+  const message = `${origin.host} wants you to sign in with your Solana account:\n${wallet}\n\nSign in to Pullback. This does not authorize a transaction.\n\nURI: ${origin.origin}\nVersion: 1\nChain ID: solana:mainnet\nNonce: ${randomBytes(16).toString('hex')}\nIssued At: ${new Date(now).toISOString()}\nExpiration Time: ${new Date(expiresAt).toISOString()}`;
   await db.query('INSERT INTO challenges(id,wallet,message,expires_at) VALUES($1,$2,$3,$4)', [id, wallet, message, expiresAt]);
   return { id, message, expiresAt };
 }

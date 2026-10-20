@@ -2,8 +2,10 @@ import type { Card } from './client';
 import type { Jobs } from '../jobs';
 
 export type Purchase = {
-  id: string; wallet: string; recipient: string; priceUsdc: number; memo?: string; transaction?: string;
+  id: string; wallet: string; recipient: string; priceUsdc: number; packType?: string; memo?: string; transaction?: string;
   signedTransaction?: string; signature?: string; paid?: boolean; card?: Card;
+  /** When the payment was first seen as never landed; confirmed a minute later before giving up. */
+  expiredSeenAt?: number;
 };
 export interface PurchaseStore {
   get(id: string): Promise<Purchase | null>;

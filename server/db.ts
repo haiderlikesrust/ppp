@@ -1,9 +1,46 @@
 import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 import { mkdir } from 'node:fs/promises';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { config } from './config';
 
-export interface Database { query<T = Record<string, any>>(sql: string, params?: any[]): Promise<{ rows: T[] }>; close(): Promise<void>; }
+export interface Database {
+  query<T = Record<string, any>>(sql: string, params?: any[]): Promise<{ rows: T[]; command?: string }>;
+  close(): Promise<void>;
+  /** Runs `fn` in a transaction that unrelated queries cannot slip into (see `gated`). */
+  transaction?<T>(fn: () => Promise<T>): Promise<T>;
+}
+
+const inTransaction = new AsyncLocalStorage<true>();
+
+/**
+ * Everything shares one connection, and BEGIN…COMMIT on a shared connection would absorb any query
+ * sent meanwhile by unrelated work (a sign-in, a balance snapshot), which a ROLLBACK would then undo.
+ * While a transaction is open, queries from outside it wait at this gate; queries inside it pass.
+ */
+function gated(raw: Database): Database {
+  let gate: Promise<void> = Promise.resolve();
+  return {
+    query: async (sql, params) => { if (!inTransaction.getStore()) await gate; return raw.query(sql, params); },
+    close: () => raw.close(),
+    transaction: async fn => {
+      let release!: () => void;
+      const previous = gate; gate = new Promise(resolve => { release = resolve; });
+      await previous;
+      try {
+        return await inTransaction.run(true, async () => {
+          await raw.query('BEGIN');
+          try {
+            const result = await fn();
+            // Postgres answers COMMIT on an aborted transaction with ROLLBACK and no error.
+            if ((await raw.query('COMMIT')).command === 'ROLLBACK') throw new Error('The database rolled this transaction back.');
+            return result;
+          } catch (error) { await raw.query('ROLLBACK').catch(() => {}); throw error; }
+        });
+      } finally { release(); }
+    },
+  };
+}
 
 export async function openDatabase(url = config.DATABASE_URL, directory = config.PGLITE_DIR): Promise<Database> {
   if (url) {
@@ -16,18 +53,19 @@ export async function openDatabase(url = config.DATABASE_URL, directory = config
     if (!lock.rows[0].acquired) { await client.end(); throw new Error('Another coordinator is already running.'); }
     connected = true;
     // A pool can silently reconnect without owning the advisory lock. Stop instead; restart reconciles.
-    return {
+    return gated({
       query: async <T>(sql: string, params?: any[]) => {
         if (!connected) throw new Error('Database coordinator connection lost. Restart to reconcile.');
-        return { rows: (await client.query(sql, params)).rows as T[] };
+        const result = await client.query(sql, params);
+        return { rows: result.rows as T[], command: result.command };
       },
       close: async () => { connected = false; await client.end(); },
-    };
+    });
   }
   if (directory !== 'memory://') await mkdir(directory, { recursive: true });
   const database = new PGlite(directory);
   await database.waitReady;
-  return { query: async (sql, params) => database.query(sql, params), close: () => database.close() };
+  return gated({ query: async (sql, params) => database.query(sql, params), close: () => database.close() });
 }
 
 export async function migrate(db: Database) {
@@ -71,6 +109,9 @@ export class Serial {
 }
 
 export async function atomic<T>(db: Database, fn: () => Promise<T>) {
+  // Nested calls are part of the transaction already open.
+  if (inTransaction.getStore()) return fn();
+  if (db.transaction) return db.transaction(fn);
   await db.query('BEGIN');
   try { const result = await fn(); await db.query('COMMIT'); return result; } catch (error) { await db.query('ROLLBACK'); throw error; }
 }

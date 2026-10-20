@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { ShowcaseSource } from './showcase';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -24,6 +25,8 @@ export function originAllowed(method: string, origin: string | undefined, fetchS
   if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return true;
   return fetchSite !== 'cross-site' && (!origin || origin === appOrigin);
 }
+
+const showcase = new ShowcaseSource();
 
 export async function createApp(options: { services?: Services; timers?: boolean; logger?: boolean } = {}) {
   const app = Fastify({ logger: options.logger ?? true, bodyLimit: 16_384, requestTimeout: 30_000, trustProxy: trustInternalProxies(config.TRUST_PROXY_HOPS) });
@@ -57,8 +60,8 @@ export async function createApp(options: { services?: Services; timers?: boolean
   const setSession = (reply: any, token: string) => reply.setCookie(COOKIE, token, { path: '/', httpOnly: true, sameSite: 'strict', secure: config.APP_ORIGIN.startsWith('https:'), maxAge: 86_400 });
 
   app.get('/api/health', { config: { rateLimit: false } }, async (_req, reply) => {
-    try { await db.query('SELECT 1'); } catch { return reply.code(503).send({ ok: false, service: 'pull-protection' }); }
-    return { ok: true, service: 'pull-protection', mode: s.practice ? 'practice' : config.live ? 'mainnet' : 'read-only', database: config.DATABASE_URL ? 'postgres' : 'embedded-postgres', spendingEnabled: config.live && !s.settings.current.paused };
+    try { await db.query('SELECT 1'); } catch { return reply.code(503).send({ ok: false, service: 'pullback' }); }
+    return { ok: true, service: 'pullback', mode: s.practice ? 'practice' : config.live ? 'mainnet' : 'read-only', database: config.DATABASE_URL ? 'postgres' : 'embedded-postgres', spendingEnabled: config.live && !s.settings.current.paused };
   });
   app.get('/api/config', async () => ({ mode: s.practice ? 'practice' : config.live ? 'mainnet' : 'read-only', mint: s.solana.holderMint, poolAddress: s.solana.poolAddress, opsAddress: s.solana.opsAddress, settings: publicSettings(s) }));
 
@@ -88,9 +91,10 @@ export async function createApp(options: { services?: Services; timers?: boolean
   });
   app.post('/api/orders', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);
-    const { priceUsd } = z.object({ priceUsd: z.number().int().positive() }).parse(req.body);
+    // `priceUsd` alone is from older pages, which only offered Pokémon packs.
+    const body = z.object({ code: z.string().min(1).max(40).optional(), priceUsd: z.number().int().positive().optional() }).refine(b => b.code || b.priceUsd, 'Choose a pack.').parse(req.body);
     // Slow provider and RPC calls run outside the queue; only the DB check-and-insert waits in it.
-    return s.orders.create(session.wallet, priceUsd, fn => serial.run(fn));
+    return s.orders.create(session.wallet, body.code ?? `pokemon_${body.priceUsd}`, fn => serial.run(fn));
   });
   app.post('/api/orders/:id/pay', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);
@@ -127,6 +131,8 @@ export async function createApp(options: { services?: Services; timers?: boolean
 
   app.get('/api/pool', async () => s.pool.view());
   app.get('/api/activity', async () => ({ items: await s.pool.activity() }));
+  // Collector Crypt's pack images and one real card, for the site's artwork.
+  app.get('/api/showcase', async () => showcase.get());
 
   app.get('/api/admin', async req => {
     await auth(req, true);
@@ -136,7 +142,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
       problems: settingsProblems(s.settings.current, calibration?.distributions ?? []), calibration,
       review: (await db.query("SELECT id,wallet,status,error,updated_at::text FROM orders WHERE status='review' ORDER BY updated_at DESC LIMIT 50")).rows,
       // Paid orders that keep failing a step and are waiting to retry, with the reason.
-      delayed: (await db.query("SELECT id,status,error,COALESCE((data->>'failures')::int,0) AS failures,COALESCE((data->>'retryAt')::bigint,0)::text AS retry_at,updated_at::text FROM orders WHERE status IN ('paying','paid','buying','delivering','settling','refunding') AND COALESCE((data->>'failures')::int,0) > 0 ORDER BY updated_at DESC LIMIT 50")).rows.map(r => ({ ...r, error: r.error ? redact(r.error) : null })),
+      delayed: (await db.query("SELECT id,status,error,COALESCE((data->>'failures')::int,0) AS failures,COALESCE((data->>'retryAt')::bigint,0)::text AS retry_at,updated_at::text FROM orders WHERE status IN ('paying','paid','buying','delivering','settling','refunding') AND (COALESCE((data->>'failures')::int,0) > 0 OR (data->'waiting'->>'status' = status AND (data->'waiting'->>'since')::bigint < $1)) ORDER BY updated_at DESC LIMIT 50", [Date.now() - 10 * 60_000])).rows.map(r => ({ ...r, error: r.error ? redact(r.error) : null })),
       // Includes Collector Crypt purchases that were signed but never finished, so none can hide.
       jobs: (await db.query("SELECT id,kind,status,error,updated_at::text FROM jobs WHERE status IN ('failed','retryable','submitted','prepared') OR (kind='cc-purchase' AND status IN ('signed','ordered') AND updated_at < $1) ORDER BY updated_at DESC LIMIT 50", [Date.now() - 600_000])).rows,
       audit: (await db.query('SELECT id::text,event,data,created_at::text FROM audit ORDER BY id DESC LIMIT 50')).rows,
@@ -154,6 +160,20 @@ export async function createApp(options: { services?: Services; timers?: boolean
       await s.settings.save(next); await audit(db, 'settings-updated', { wallet: session.wallet, settings: next });
     });
     return { settings: s.settings.current, version: settingsVersion(s.settings.current) };
+  });
+  // Quick sell: Collector Crypt's sell-back for a card from a finished order.
+  app.get('/api/orders/:id/sell', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async req => {
+    const session = await auth(req); const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return s.orders.sellQuote(session.wallet, id);
+  });
+  app.post('/api/orders/:id/sell', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
+    const session = await auth(req); const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    return s.orders.sellStart(session.wallet, id);
+  });
+  app.post('/api/orders/:id/sell/submit', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
+    const session = await auth(req); const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { signed } = z.object({ signed: z.string().min(1).max(4_000) }).parse(req.body);
+    return s.orders.sellSubmit(session.wallet, id, signed);
   });
   app.post('/api/admin/orders/:id/retry-now', async req => {
     const session = await auth(req, true);
@@ -224,5 +244,5 @@ export async function createApp(options: { services?: Services; timers?: boolean
 
 function publicSettings(s: Services) {
   const c = s.settings.current;
-  return { feeBps: c.feeBps, poolShareBps: c.poolShareBps, tiers: c.tiers, maxRebateUsd: c.maxRebateUsd, offsiteHoldHours: c.offsiteHoldHours, onsiteHoldHours: c.onsiteHoldHours, offsiteActivationHours: c.offsiteActivationHours, offsite: { enabled: c.offsite.enabled, claimWindowHours: c.offsite.claimWindowHours, perWalletDailyClaims: c.offsite.perWalletDailyClaims, perWalletDailyUsd: c.offsite.perWalletDailyUsd, perWalletWeeklyUsd: c.offsite.perWalletWeeklyUsd, dailyPoolBps: c.offsite.dailyPoolBps, targetReserveUsd: c.offsite.targetReserveUsd }, breaker: c.breaker, pausedPrices: c.pausedPrices, paused: c.paused, gas: { maxUsdPerDay: c.gas.maxUsdPerDay } };
+  return { feeBps: c.feeBps, poolShareBps: c.poolShareBps, tiers: c.tiers, maxRebateUsd: c.maxRebateUsd, offsiteHoldHours: c.offsiteHoldHours, onsiteHoldHours: c.onsiteHoldHours, offsiteActivationHours: c.offsiteActivationHours, offsite: { enabled: c.offsite.enabled, claimWindowHours: c.offsite.claimWindowHours, perWalletDailyClaims: c.offsite.perWalletDailyClaims, perWalletDailyUsd: c.offsite.perWalletDailyUsd, perWalletWeeklyUsd: c.offsite.perWalletWeeklyUsd, dailyPoolBps: c.offsite.dailyPoolBps, targetReserveUsd: c.offsite.targetReserveUsd }, breaker: c.breaker, pausedPacks: c.pausedPacks, paused: c.paused, gas: { maxUsdPerDay: c.gas.maxUsdPerDay } };
 }

@@ -2,10 +2,12 @@ import { PublicKey } from '@solana/web3.js';
 
 export const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 export type Card = { mint: string; name: string; image: string | null; insuredValueUsd: number | null; rarity: string | null; transferSignature: string | null };
-export type Buyback = { available: boolean; amountUsdc: number | null; secondsRemaining: number | null };
+export type Buyback = { available: boolean; amountMicros: number | null; expiresAt: number | null };
 export class ApiError extends Error {
-  constructor(readonly status: number) { super(`Collector Crypt returned HTTP ${status}.`); }
+  constructor(readonly status: number, readonly detail = '') { super(`Collector Crypt returned HTTP ${status}${detail ? `: ${detail}` : ''}.`); }
 }
+/** Collector Crypt refusing to sell from a machine right now ("Machine is low", "off", "empty", "off balance"). Nothing is charged. */
+export const machineUnavailable = (error: unknown) => error instanceof ApiError && /machine is (low|off|empty)|off balance/i.test(error.detail);
 export class CollectorCrypt {
   constructor(private readonly apiKey = '', private readonly fetcher: typeof fetch = fetch) {}
   private async request(path: string, body?: unknown): Promise<any> {
@@ -14,19 +16,23 @@ export class CollectorCrypt {
       headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(this.apiKey ? { 'x-api-key': this.apiKey } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (!response.ok) throw new ApiError(response.status);
+    if (!response.ok) {
+      // Keep Collector Crypt's own reason (e.g. "Machine is low"): it decides between retrying and refunding.
+      const body: any = await response.json().catch(() => null);
+      throw new ApiError(response.status, [body?.error, body?.details, body?.message].filter(x => typeof x === 'string' && x).join(' · ').slice(0, 160));
+    }
     return response.json();
   }
   async machines(): Promise<any[]> {
     const result = await this.request('/machines');
     if (!Array.isArray(result.machines)) throw new Error('Unexpected machine catalog.');
-    return result.machines.filter((m: any) => m.public && /^pokemon_\d+$/.test(m.code));
+    return result.machines.filter((m: any) => m.public);
   }
-  async generatePack(playerAddress: string, priceUsdc: number) {
+  async generatePack(playerAddress: string, packType: string, priceUsdc: number) {
     new PublicKey(playerAddress);
     if (!Number.isSafeInteger(priceUsdc) || priceUsdc <= 0) throw new Error('Use a positive whole-USDC pack price.');
-    const machine = (await this.machines()).find(m => m.code === `pokemon_${priceUsdc}` && m.price === priceUsdc && m.contains === 1);
-    if (!machine) throw new Error('That single-card Pokémon pack is not in the public catalog.');
+    const machine = (await this.machines()).find(m => m.code === packType && m.price === priceUsdc && m.contains === 1);
+    if (!machine) throw new Error('That pack is not in the public catalog.');
     const order = await this.request('/generatePack', { playerAddress, packType: machine.code, turbo: false });
     if (typeof order.memo !== 'string' || typeof order.transaction !== 'string') throw new Error('Invalid pack order.');
     return { memo: order.memo as string, transaction: order.transaction as string };
@@ -39,10 +45,23 @@ export class CollectorCrypt {
   async buybackQuote(mint: string): Promise<Buyback> {
     new PublicKey(mint);
     const quote = await this.request(`/buyback/available?${new URLSearchParams({ nft: mint })}`);
-    if (quote.available === false) return { available: false, amountUsdc: null, secondsRemaining: null };
-    const amount = Number(quote.amount);
+    if (quote.available === false) return { available: false, amountMicros: null, expiresAt: null };
+    const amount = Number(quote.amount), expires = Date.parse(quote.buybackExpiresAt ?? '');
     if (quote.available !== true || !Number.isSafeInteger(amount) || amount < 10_000 || amount > 280_000_000_000) throw new Error('Invalid buyback quote.');
-    return { available: true, amountUsdc: amount / 1e6, secondsRemaining: Number.isFinite(quote.timeRemaining) ? quote.timeRemaining : null };
+    return { available: true, amountMicros: amount, expiresAt: Number.isFinite(expires) ? expires : null };
+  }
+  /** A sell-back transaction for the card's owner to sign. USDC goes to the owner. */
+  async buyback(playerAddress: string, nftAddress: string) {
+    new PublicKey(playerAddress); new PublicKey(nftAddress);
+    const offer = await this.request('/buyback', { playerAddress, nftAddress });
+    const amount = Number(offer.refundAmount);
+    if (typeof offer.serializedTransaction !== 'string' || !Number.isSafeInteger(amount) || amount < 10_000 || amount > 280_000_000_000) throw new Error('Collector Crypt did not return a sell offer.');
+    return { transaction: offer.serializedTransaction as string, amountMicros: amount };
+  }
+  async submitTransaction(signedTransaction: string) {
+    const result = await this.request('/submitTransaction', { signedTransaction });
+    if (!result.success || typeof result.signature !== 'string') throw new Error('Collector Crypt did not accept the signed sale.');
+    return result.signature as string;
   }
   /** Reads metadata for an existing purchase by memo (no payment or opening). */
   async cardDetails(memo: string, dasRpcUrl?: string): Promise<Card | null> {

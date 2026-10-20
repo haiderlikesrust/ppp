@@ -1,4 +1,4 @@
-# Deploy Pull Protection on Dokploy
+# Deploy Pullback on Dokploy
 
 Use a **Docker Compose** service sourced from this Git repository. The stack runs three containers:
 
@@ -53,7 +53,7 @@ For a code update, open the existing Compose service, keep branch `main` and Com
 
 Run **one server container**. It owns the payout jobs, and a PostgreSQL advisory lock refuses a second coordinator. Do not enable replicas, rolling overlap or blue/green deploys. Pausing in `/admin` before a planned redeploy is good practice; the server finishes or resumes every in-flight transaction from the database after a restart, so nothing is paid twice.
 
-The `pull-protection-postgres` volume holds wallets, sessions, holder snapshots, orders, claims, the ledger, settings and every recoverable transaction. Keep the same Dokploy project and Compose identity across redeployments, never remove the volume when updating, and do not change `POSTGRES_PASSWORD` on an existing volume without also changing the database role's password. Set up backups (for example scheduled `pg_dump`) before launch and test a restore.
+The `pull-protection-postgres` volume (named before the rebrand; keep the name so existing data stays attached) holds wallets, sessions, holder snapshots, orders, claims, the ledger, settings and every recoverable transaction. Keep the same Dokploy project and Compose identity across redeployments, never remove the volume when updating, and do not change `POSTGRES_PASSWORD` on an existing volume without also changing the database role's password. Set up backups (for example scheduled `pg_dump`) before launch and test a restore.
 
 Containers restart after crashes. An unhealthy status alone does not restart a Compose container: read its logs and fix the failed dependency. The gateway re-resolves Docker DNS every 10 seconds, so a replaced server container needs no manual change.
 
@@ -72,9 +72,9 @@ Full production stack on a Linux Docker engine (Docker Desktop works):
 
 ```sh
 docker network create dokploy-network
-APP_ORIGIN=http://127.0.0.1:8080 POSTGRES_PASSWORD=localTestOnly docker compose -p pull-protection-ci -f compose.dokploy.yaml -f compose.ci.yaml up -d --build --wait
+APP_ORIGIN=http://127.0.0.1:8080 POSTGRES_PASSWORD=localTestOnly docker compose -p pullback-ci -f compose.dokploy.yaml -f compose.ci.yaml up -d --build --wait
 SMOKE_TEST_FIXTURE=true APP_ORIGIN=http://127.0.0.1:8080 npm run smoke:dokploy
-docker compose -p pull-protection-ci -f compose.dokploy.yaml -f compose.ci.yaml down -v
+docker compose -p pullback-ci -f compose.dokploy.yaml -f compose.ci.yaml down -v
 ```
 
 `compose.ci.yaml` only publishes the gateway on `127.0.0.1:8080` for testing. GitHub Actions (`.github/workflows/verify.yml`) runs the same steps on every push: tests, typecheck, build, then the full three-container stack against a fresh disposable database with mainnet off, checked through Nginx by `scripts/smoke-dokploy.mjs`. Wait for **Verify app and Dokploy stack** to pass before your first VPS deployment.

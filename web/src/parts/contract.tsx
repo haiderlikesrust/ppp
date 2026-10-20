@@ -19,27 +19,27 @@ export function ContractAddress({ variant, className = '' }: { variant: 'chip' |
     catch { notify(`Contract address: ${mint}`); }
   }
   const CopyIcon = copied ? Check : Copy;
-  const link = <a href={solscan('token', mint)} target="_blank" rel="noreferrer" aria-label="View the token on Solscan" title="View on Solscan" className="grid size-8 shrink-0 place-items-center rounded-full text-muted hover:bg-line/60 hover:text-ink"><ArrowUpRight size={15} /></a>;
+  const link = <a href={solscan('token', mint)} target="_blank" rel="noreferrer" aria-label="View the token on Solscan" title="View on Solscan" className="grid size-8 shrink-0 place-items-center rounded-md text-muted hover:bg-raised hover:text-ink"><ArrowUpRight size={15} /></a>;
 
-  if (variant === 'chip') return <div className={`flex h-9 items-center whitespace-nowrap rounded-full border border-line pl-3 pr-0.5 text-sm ${className}`} title={mint}>
+  if (variant === 'chip') return <div className={`flex h-9 items-center whitespace-nowrap rounded-md border border-line bg-surface pl-3 pr-0.5 text-sm ${className}`} title={mint}>
     <span className="label mr-2">CA</span>
-    <button onClick={copy} className="num flex items-center gap-1.5 rounded-full py-1 pr-2 hover:text-red" aria-label={`Copy contract address ${mint}`}>{short(mint)}<CopyIcon size={13} className={copied ? 'text-grass' : 'text-muted'} /></button>
+    <button onClick={copy} className="pixel num flex items-center gap-1.5 py-1 pr-2 hover:text-volt" aria-label={`Copy contract address ${mint}`}>{short(mint)}<CopyIcon size={13} className={copied ? 'text-gain' : 'text-muted'} /></button>
     {link}
   </div>;
 
   if (variant === 'row') return <div className={`flex items-center gap-2 text-sm ${className}`}>
     <span className="label shrink-0">CA</span>
-    <button onClick={copy} className="num min-w-0 flex-1 truncate text-left hover:text-red" aria-label={`Copy contract address ${mint}`} title={mint}>{mint}</button>
-    <button onClick={copy} aria-label="Copy contract address" className="grid size-8 shrink-0 place-items-center rounded-full text-muted hover:bg-line/60 hover:text-ink"><CopyIcon size={15} className={copied ? 'text-grass' : ''} /></button>
+    <button onClick={copy} className="pixel num min-w-0 flex-1 truncate text-left text-xs hover:text-volt" aria-label={`Copy contract address ${mint}`} title={mint}>{mint}</button>
+    <button onClick={copy} aria-label="Copy contract address" className="grid size-8 shrink-0 place-items-center rounded-md text-muted hover:bg-raised hover:text-ink"><CopyIcon size={15} className={copied ? 'text-gain' : ''} /></button>
     {link}
   </div>;
 
   return <div className={`card flex w-full min-w-0 max-w-lg items-center gap-3 py-2 pl-4 pr-2 ${className}`}>
     <div className="min-w-0 flex-1">
       <div className="label">Contract address</div>
-      <button onClick={copy} className="num mt-0.5 block max-w-full truncate text-left text-sm hover:text-red sm:text-[15px]" title={mint} aria-label={`Copy contract address ${mint}`}>{mint}</button>
+      <button onClick={copy} className="pixel num mt-0.5 block max-w-full truncate text-left text-sm hover:text-volt sm:text-[15px]" title={mint} aria-label={`Copy contract address ${mint}`}>{mint}</button>
     </div>
-    <button onClick={copy} className={`btn btn-sm shrink-0 ${copied ? 'bg-grass text-white' : 'btn-ink'}`}><CopyIcon size={14} />{copied ? 'Copied' : 'Copy'}</button>
+    <button onClick={copy} className={`btn btn-sm shrink-0 ${copied ? 'bg-gain text-night' : 'btn-primary'}`}><CopyIcon size={14} />{copied ? 'Copied' : 'Copy'}</button>
     {link}
   </div>;
 }

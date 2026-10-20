@@ -24,16 +24,16 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - name: Validate Compose
-        run: docker compose -p pull-protection-ci -f compose.dokploy.yaml -f compose.ci.yaml config --quiet
+        run: docker compose -p pullback-ci -f compose.dokploy.yaml -f compose.ci.yaml config --quiet
       - name: Build and start production images
         run: |
           docker network create dokploy-network
-          docker compose -p pull-protection-ci -f compose.dokploy.yaml -f compose.ci.yaml up -d --build --wait --wait-timeout 180
+          docker compose -p pullback-ci -f compose.dokploy.yaml -f compose.ci.yaml up -d --build --wait --wait-timeout 180
       - name: Verify pages, assets, headers and wallet sessions through the gateway
         run: npm run smoke:dokploy
       - name: Stack logs
         if: failure()
-        run: docker compose -p pull-protection-ci -f compose.dokploy.yaml -f compose.ci.yaml logs --tail 100
+        run: docker compose -p pullback-ci -f compose.dokploy.yaml -f compose.ci.yaml logs --tail 100
       - name: Stop fixture stack
         if: always()
-        run: docker compose -p pull-protection-ci -f compose.dokploy.yaml -f compose.ci.yaml down -v
+        run: docker compose -p pullback-ci -f compose.dokploy.yaml -f compose.ci.yaml down -v

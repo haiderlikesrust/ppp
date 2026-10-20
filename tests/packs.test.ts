@@ -1,0 +1,99 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { setup, settle, user } from './helpers';
+import { ApiError, machineUnavailable } from '../server/cc/client';
+import { openDatabase } from '../server/db';
+import { SettingsStore } from '../server/settings';
+import { migrate } from '../server/db';
+import { fromWinner, pickExample, toCard } from '../server/showcase';
+
+test('watch packs are on sale and settle like Pokémon packs, keyed by machine code', async () => {
+  const s = await setup(), { wallet } = await user(s);
+  const quotes = await s.orders.quotes(wallet);
+  assert.ok(quotes.some(q => q.code === 'ewatch_250') && quotes.some(q => q.code === 'ewatch_500'), 'watch machines are offered');
+  assert.equal(quotes.filter(q => q.priceUsd === 500).length, 2, '$500 is both a Pokémon and a watch pack');
+  const { order } = await s.orders.create(wallet, 'ewatch_250');
+  assert.equal(order.packCode, 'ewatch_250');
+  await s.orders.pay(wallet, order.id, 'practice');
+  const done = await settle(s, order.id);
+  assert.equal(done.status, 'complete');
+  assert.match(done.card!.name, /Box & papers/);
+  await assert.rejects(s.orders.create(wallet, 'sealed_80'), /not available here/);
+  await s.db.close();
+});
+
+test('when Collector Crypt says a machine is low, the order refunds at once and nothing retries', async () => {
+  assert.ok(machineUnavailable(new ApiError(500, 'Machine is low')));
+  assert.ok(machineUnavailable(new ApiError(500, 'Machine is off balance')));
+  assert.ok(!machineUnavailable(new ApiError(500, 'Internal error')));
+  const s = await setup(), { wallet } = await user(s);
+  s.packs.machineLow.add('pokemon_50');
+  const { order } = await s.orders.create(wallet, 'pokemon_50');
+  await s.orders.pay(wallet, order.id, 'practice');
+  const done = await settle(s, order.id);
+  assert.equal(done.status, 'refunded');
+  assert.ok(done.refundSignature);
+  await s.db.close();
+});
+
+test('pausing a $500 Pokémon pack leaves the $500 watch pack on sale', async () => {
+  const s = await setup({ pausedPacks: ['pokemon_500'] }), { wallet } = await user(s, 20_000);
+  const quotes = await s.orders.quotes(wallet);
+  assert.equal(quotes.find(q => q.code === 'pokemon_500')!.quote.protected, false);
+  assert.equal(quotes.find(q => q.code === 'ewatch_500')!.quote.protected, true);
+  await s.db.close();
+});
+
+test('paused prices saved before pack codes become paused Pokémon packs', async () => {
+  const db = await openDatabase(undefined, 'memory://');
+  await migrate(db);
+  await db.query('INSERT INTO settings(id,data) VALUES(1,$1)', [JSON.stringify({ pausedPrices: [50] })]);
+  const settings = await new SettingsStore(db).load();
+  assert.deepEqual(settings.pausedPacks, ['pokemon_50']);
+  await db.close();
+});
+
+test('quick sell: the buyer sells the card back once, for the live offer', async () => {
+  const s = await setup(), { wallet } = await user(s), other = await user(s);
+  const { order } = await s.orders.create(wallet, 'pokemon_25');
+  await s.orders.pay(wallet, order.id, 'practice');
+  const done = await settle(s, order.id);
+  const quote = await s.orders.sellQuote(wallet, order.id);
+  assert.equal(quote.available, true);
+  assert.equal(quote.amountUsd, Math.round(done.valueUsd! * 0.85 * 1e6) / 1e6, '85% of the insured value in this practice machine');
+  await assert.rejects(s.orders.sellStart(other.wallet, order.id), /not found/);
+  const offer = await s.orders.sellStart(wallet, order.id);
+  const sold = await s.orders.sellSubmit(wallet, order.id, offer.transaction);
+  assert.equal(sold.sale?.amountUsd, offer.amountUsd);
+  await assert.rejects(s.orders.sellStart(wallet, order.id), /already sold/);
+  await s.db.close();
+});
+
+test('saved tiers with earlier default names get the new names; custom names stay', async () => {
+  const db = await openDatabase(undefined, 'memory://');
+  await migrate(db);
+  const tiers = [{ id: 't1', name: 'Holder', minSupplyPpm: 1_000, onsiteCoverageBps: 2_500, offsiteCoverageBps: 2_000 }, { id: 't2', name: 'Gym Leader', minSupplyPpm: 10_000, onsiteCoverageBps: 5_000, offsiteCoverageBps: 3_500 }, { id: 't3', name: 'Kraken', minSupplyPpm: 20_000, onsiteCoverageBps: 10_000, offsiteCoverageBps: 6_000 }];
+  await db.query('INSERT INTO settings(id,data) VALUES(1,$1)', [JSON.stringify({ tiers })]);
+  const settings = await new SettingsStore(db).load();
+  assert.deepEqual(settings.tiers.map(t => t.name), ['Shrimp', 'Dolphin', 'Kraken']);
+  await db.close();
+});
+
+test('the showcase turns a Collector Crypt NFT into a slab card and picks a real losing $25 pull', () => {
+  const nft = (value: number, i: number) => ({ name: `2021 #00${i} Birthday Pikachu-Holo`, image: `https://d1xpxki1g4htqu.cloudfront.net/img${i}`, insured_value: value, rarity: 'common', attributes: [{ trait_type: 'Year', value: '2021' }, { trait_type: 'Grading Company', value: 'PSA' }, { trait_type: 'The Grade', value: 'GEM-MT 10' }] });
+  assert.deepEqual(toCard(nft(12, 1)), { name: 'Birthday Pikachu-Holo · 2021 · PSA 10', image: 'https://d1xpxki1g4htqu.cloudfront.net/img1', insuredValueUsd: 12, rarity: 'common' });
+  assert.equal(toCard({ ...nft(12, 1), image: 'http://insecure.example/x' }), null, 'only https images');
+  const picked = pickExample([nft(450, 1), nft(8, 2), nft(14, 3), nft(19, 4), nft(30, 5)]);
+  assert.ok(picked && picked.insuredValueUsd < 25 && picked.insuredValueUsd >= 5, 'a card that lost money on a $25 pack');
+  assert.equal(pickExample([nft(450, 1)]), null);
+});
+
+test('a recent Collector Crypt pull becomes a slab card without its grade repeated in the title', () => {
+  const winner = { insuredValue: 13, nft: { content: { metadata: { name: '2006 #65 Exeggcute δ CGC 9 EX H', attributes: [{ trait_type: 'Year', value: '2006' }, { trait_type: 'Grading Company', value: 'CGC' }, { trait_type: 'The Grade', value: '9' }] }, files: [{ cc_cdn: 'https://d1xpxki1g4htqu.cloudfront.net/abc' }] } } };
+  assert.deepEqual(toCard(fromWinner(winner)), { name: 'Exeggcute δ · 2006 · CGC 9', image: 'https://d1xpxki1g4htqu.cloudfront.net/abc', insuredValueUsd: 13, rarity: null });
+});
+
+test('a full Collector Crypt card name splits into card, set and grade', () => {
+  const nft = { name: '2025 Pokemon Prismatic Evolutions #136 Eri CGC 10', image: 'https://d1xpxki1g4htqu.cloudfront.net/eri', insured_value: 17, attributes: [{ trait_type: 'Year', value: '2025' }, { trait_type: 'Grading Company', value: 'CGC' }, { trait_type: 'The Grade', value: 'GEM MINT 10' }] };
+  assert.equal(toCard(nft)?.name, 'Eri · Prismatic Evolutions · CGC 10');
+});

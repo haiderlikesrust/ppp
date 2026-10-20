@@ -6,6 +6,7 @@ import { buildPayment, validateSignedPayment, type PaymentIntent } from './payme
 import { PendingOperation } from './jobs';
 import type { BuiltPayment, CcPayment, PackMachine, PackProvider, PaymentState, PurchaseResult, Solana } from './ports';
 import type { Settings } from '../shared/types';
+import { PACK_CATALOG } from '../shared/packs';
 
 const fakeSignature = () => bs58.encode(randomBytes(64));
 const fakeAddress = () => Keypair.generate().publicKey.toBase58();
@@ -115,6 +116,8 @@ export class MockSolana implements Solana {
 }
 
 const NAMES = ['Charizard', 'Pikachu', 'Umbreon', 'Mewtwo', 'Gengar', 'Rayquaza', 'Lugia', 'Eevee', 'Blastoise', 'Snorlax', 'Gyarados', 'Dragonite', 'Mew', 'Sylveon', 'Greninja', 'Lucario'];
+const WATCHES = ['Submariner', 'Speedmaster', 'Black Bay', 'Santos', 'Carrera', 'Navitimer', 'Royal Oak', 'Nautilus'];
+const MAKERS = ['Rolex', 'Omega', 'Tudor', 'Cartier', 'TAG Heuer', 'Breitling', 'Audemars Piguet', 'Patek Philippe'];
 const SETS = ['Base Set', 'Evolving Skies', 'Hidden Fates', 'Crown Zenith', '151', 'Paldean Fates', 'Lost Origin', 'Celebrations'];
 
 /** Deterministic pseudo-random numbers from a seed string. */
@@ -142,39 +145,59 @@ export class MockPacks implements PackProvider {
   /** Calls to `buy` whose pack payment provably never landed (expired or failed on-chain). */
   unpaidFailures = 0;
   soldOut = new Set<number>();
+  /** Machine codes Collector Crypt is refusing to sell from ("Machine is low"). */
+  machineLow = new Set<string>();
+  /** The next card arrives before Collector Crypt has recorded its insured value. */
+  valueLater = false;
+  /** Cards sold back, by mint. */
+  readonly sold = new Set<string>();
   constructor(readonly ops: () => string) {}
 
-  async machines(): Promise<PackMachine[]> { return [25, 50, 100, 500].filter(p => !this.soldOut.has(p)).map(priceUsd => ({ priceUsd, code: `pokemon_${priceUsd}` })); }
+  async machines(): Promise<PackMachine[]> { return PACK_CATALOG.filter(p => !this.soldOut.has(p.priceUsd)).map(p => ({ priceUsd: p.priceUsd, code: p.code })); }
 
-  async buy(purchaseId: string, priceUsd: number): Promise<PurchaseResult> {
+  async buy(purchaseId: string, code: string, priceUsd: number): Promise<PurchaseResult> {
     const entry = this.purchases.get(purchaseId) ?? { calls: 0 };
     this.purchases.set(purchaseId, entry);
     if (entry.result) return entry.result;
     if (this.outageCalls > 0) { this.outageCalls--; throw new TypeError('fetch failed'); }
     if (this.unpaidFailures > 0) { this.unpaidFailures--; throw new Error('Pack payment expired before landing; no USDC moved.'); }
-    if (this.soldOut.has(priceUsd)) throw new Error('That single-card Pokémon pack is not in the public catalog.');
+    if (this.soldOut.has(priceUsd)) throw new Error('That pack is not in the public catalog.');
+    if (this.machineLow.has(code) && !entry.calls) throw new Error('That pack is not available right now (Collector Crypt: Machine is low).');
     if (entry.calls++ < this.pendingCalls) return { state: 'pending', message: 'Payment submitted. Resume this order to check confirmation.' };
     const memo = `cc-${randomUUID()}`, signature = fakeSignature();
-    const card = this.card(purchaseId, priceUsd);
-    entry.result = { state: 'complete', memo, signature, card };
-    this.records.set(memo, { pack: { status: 'confirmed', wallet: this.ops(), pack_type: `pokemon_${priceUsd}`, transaction_signature: signature, refunded: false }, send: { status: 'confirmed', nft_address: card.mint, to_wallet: this.ops(), insured_value: card.insuredValueUsd } });
+    const card = this.card(purchaseId, priceUsd, code);
+    entry.result = { state: 'complete', memo, signature, card: this.valueLater ? { ...card, insuredValueUsd: null } : card };
+    this.valueLater = false;
+    this.records.set(memo, { pack: { status: 'confirmed', wallet: this.ops(), pack_type: code, transaction_signature: signature, refunded: false }, send: { status: 'confirmed', nft_address: card.mint, to_wallet: this.ops(), insured_value: card.insuredValueUsd } });
     return entry.result;
   }
 
-  card(seed: string, priceUsd: number) {
+  card(seed: string, priceUsd: number, code = `pokemon_${priceUsd}`) {
     const rand = seeded(seed), value = Math.round(priceUsd * mockValueRatio(rand) * 100) / 100;
-    const name = NAMES[Math.floor(rand() * NAMES.length)], set = SETS[Math.floor(rand() * SETS.length)], grade = 7 + Math.floor(rand() * 4);
-    return { mint: new PublicKey(createHash('sha256').update(`mint:${seed}`).digest()).toBase58(), name: `${name} · ${set} · PSA ${grade}`, image: null, insuredValueUsd: value, rarity: value >= priceUsd * 1.4 ? 'Epic' : value >= priceUsd ? 'Rare' : 'Common', transferSignature: null };
+    const watch = code.startsWith('ewatch'), pick = (list: string[]) => list[Math.floor(rand() * list.length)];
+    const name = watch ? pick(WATCHES) : pick(NAMES), set = watch ? pick(MAKERS) : pick(SETS), grade = watch ? 'Box & papers' : `PSA ${7 + Math.floor(rand() * 4)}`;
+    return { mint: new PublicKey(createHash('sha256').update(`mint:${seed}`).digest()).toBase58(), name: `${name} · ${set} · ${grade}`, image: null, insuredValueUsd: value, rarity: value >= priceUsd * 1.4 ? 'Epic' : value >= priceUsd ? 'Rare' : 'Common', transferSignature: null };
   }
 
   /** Practice helper: a pack someone opened directly on Collector Crypt. */
-  offsitePull(solana: MockSolana, wallet: string, priceUsd: number, pulledAt: number) {
-    const memo = `cc-${randomUUID()}`, signature = fakeSignature(), card = this.card(memo, priceUsd);
+  offsitePull(solana: MockSolana, wallet: string, priceUsd: number, pulledAt: number, code = `pokemon_${priceUsd}`) {
+    const memo = `cc-${randomUUID()}`, signature = fakeSignature(), card = this.card(memo, priceUsd, code);
     solana.ccPayments.set(wallet, [...(solana.ccPayments.get(wallet) ?? []), { memo, signature, priceMicros: priceUsd * 1_000_000, blockTime: pulledAt }]);
-    this.records.set(memo, { pack: { status: 'confirmed', wallet, pack_type: `pokemon_${priceUsd}`, transaction_signature: signature, refunded: false }, send: { status: 'confirmed', nft_address: card.mint, to_wallet: wallet, insured_value: card.insuredValueUsd } });
+    this.records.set(memo, { pack: { status: 'confirmed', wallet, pack_type: code, transaction_signature: signature, refunded: false }, send: { status: 'confirmed', nft_address: card.mint, to_wallet: wallet, insured_value: card.insuredValueUsd } });
     return { memo, signature, card };
   }
   setRecord(memo: string, record: any) { this.records.set(memo, record); }
+  /** Practice sell-back: 85% of the insured value, like Collector Crypt's lower machines. */
+  async buybackQuote(mint: string) {
+    const record = [...this.records.values()].find(r => r.send?.nft_address === mint);
+    if (!record || this.sold.has(mint)) return { available: false, amountMicros: null, expiresAt: null };
+    return { available: true, amountMicros: Math.round(Number(record.send.insured_value) * 0.85 * 1e6), expiresAt: Date.now() + 72 * 3_600_000 };
+  }
+  async buyback(_owner: string, mint: string) {
+    const quote = await this.buybackQuote(mint); if (!quote.available) throw new Error('This card can no longer be sold back.');
+    return { transaction: `practice-sale:${mint}`, amountMicros: quote.amountMicros! };
+  }
+  async submitBuyback(signed: string) { const mint = signed.startsWith('practice-sale:') ? signed.slice(14) : ''; if (mint) this.sold.add(mint); return fakeSignature(); }
   async status(memo: string) { return this.records.get(memo) ?? { pack: null, send: null }; }
   async asset(mint: string) {
     for (const r of this.records.values()) if (r.send?.nft_address === mint) return { name: `Card ${mint.slice(0, 4)}`, image: null };

@@ -6,7 +6,7 @@ export async function api<T = any>(path: string, body?: unknown, method?: string
     credentials: 'same-origin',
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status}).`);
+  if (!response.ok) throw Object.assign(new Error(data.error ?? `Request failed (${response.status}).`), { status: response.status });
   return data as T;
 }
 

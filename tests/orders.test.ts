@@ -8,7 +8,7 @@ import { rebateMicros, micros } from '../shared/protection';
 test('happy path: pay, buy, deliver, auto-rebate, fee split, reservation released', async () => {
   const s = await setup(), { wallet } = await user(s, 10_000);
   const poolBefore = await s.pool.balance();
-  const { order, transaction } = await s.orders.create(wallet, 25);
+  const { order, transaction } = await s.orders.create(wallet, 'pokemon_25');
   assert.equal(order.status, 'awaiting_payment');
   assert.equal(order.totalUsd, 27.5);
   assert.equal(await s.pool.reserved(), 0, 'nothing is reserved until the user pays');
@@ -31,9 +31,9 @@ test('happy path: pay, buy, deliver, auto-rebate, fee split, reservation release
 
 test('a wallet without a tier cannot buy protection, and only one unpaid order is allowed', async () => {
   const s = await setup(), poor = await user(s, 0), { wallet } = await user(s, 10_000);
-  await assert.rejects(s.orders.create(poor.wallet, 25), /Hold more/);
-  await s.orders.create(wallet, 25);
-  await assert.rejects(s.orders.create(wallet, 50), /current order/);
+  await assert.rejects(s.orders.create(poor.wallet, 'pokemon_25'), /Hold more/);
+  await s.orders.create(wallet, 'pokemon_25');
+  await assert.rejects(s.orders.create(wallet, 'pokemon_50'), /current order/);
   await s.db.close();
 });
 
@@ -41,8 +41,8 @@ test('protection is refused when the pool cannot reserve the maximum rebate', as
   const s = await setup(), { wallet } = await user(s, 20_000);
   s.solana.usdc.set(s.solana.poolAddress, BigInt(micros(100)));
   s.pool.invalidate();
-  await assert.rejects(s.orders.create(wallet, 500), /pool is full/);
-  const ok = await s.orders.create(wallet, 50);
+  await assert.rejects(s.orders.create(wallet, 'pokemon_500'), /pool is full/);
+  const ok = await s.orders.create(wallet, 'pokemon_50');
   assert.equal(ok.order.coverageBps, 10_000);
   await s.db.close();
 });
@@ -50,7 +50,7 @@ test('protection is refused when the pool cannot reserve the maximum rebate', as
 test('unpaid orders expire and release their reservation', async () => {
   const s = await setup(), { wallet } = await user(s);
   s.solana.paymentLifetimeMs = -1;
-  const { order } = await s.orders.create(wallet, 25);
+  const { order } = await s.orders.create(wallet, 'pokemon_25');
   const done = await settle(s, order.id);
   assert.equal(done.status, 'expired');
   assert.equal(await s.pool.reserved(), 0);
@@ -59,7 +59,7 @@ test('unpaid orders expire and release their reservation', async () => {
 
 test('a pack that sells out after payment is refunded in full', async () => {
   const s = await setup(), { wallet } = await user(s);
-  const { order } = await s.orders.create(wallet, 25);
+  const { order } = await s.orders.create(wallet, 'pokemon_25');
   await s.orders.pay(wallet, order.id, 'practice');
   s.packs.soldOut.add(25);
   const done = await settle(s, order.id);
@@ -71,7 +71,7 @@ test('a pack that sells out after payment is refunded in full', async () => {
 
 test('selling tokens between quote and settlement lowers the rebate', async () => {
   const s = await setup(), { wallet } = await user(s, 20_000);
-  const { order } = await s.orders.create(wallet, 25);
+  const { order } = await s.orders.create(wallet, 'pokemon_25');
   await s.orders.pay(wallet, order.id, 'practice');
   s.solana.setHolderPpm(wallet, 10_000);
   const done = await settle(s, order.id);
@@ -82,7 +82,7 @@ test('selling tokens between quote and settlement lowers the rebate', async () =
 test('a restart mid-order resumes from the database without paying twice', async () => {
   const s = await setup(), { wallet } = await user(s);
   s.packs.pendingCalls = 2;
-  const { order } = await s.orders.create(wallet, 25);
+  const { order } = await s.orders.create(wallet, 'pokemon_25');
   await s.orders.pay(wallet, order.id, 'practice');
   await s.orders.step(); await s.orders.step();
   assert.equal((await s.orders.get(order.id)).status, 'buying');
@@ -97,7 +97,7 @@ test('a restart mid-order resumes from the database without paying twice', async
 
 test('someone else cannot pay or read your order', async () => {
   const s = await setup(), { wallet } = await user(s), other = Keypair.generate().publicKey.toBase58();
-  const { order } = await s.orders.create(wallet, 25);
+  const { order } = await s.orders.create(wallet, 'pokemon_25');
   await assert.rejects(s.orders.pay(other, order.id, 'practice'), /not found/);
   await assert.rejects(s.orders.get(order.id, other), /not found/);
   await s.db.close();
@@ -105,12 +105,12 @@ test('someone else cannot pay or read your order', async () => {
 
 test('the loss-ratio breaker pauses a pack price that keeps losing money', async () => {
   const s = await setup({ breaker: { lossRatioBps: 100, minPacks: 2, windowDays: 7 } }), { wallet } = await user(s, 20_000);
-  for (let i = 0; i < 6 && !s.settings.current.pausedPrices.includes(25); i++) {
-    const { order } = await s.orders.create(wallet, 25);
+  for (let i = 0; i < 6 && !s.settings.current.pausedPacks.includes('pokemon_25'); i++) {
+    const { order } = await s.orders.create(wallet, 'pokemon_25');
     await s.orders.pay(wallet, order.id, 'practice');
     await settle(s, order.id);
   }
-  assert.deepEqual(s.settings.current.pausedPrices, [25]);
-  await assert.rejects(s.orders.create(wallet, 25), /paused/);
+  assert.deepEqual(s.settings.current.pausedPacks, ['pokemon_25']);
+  await assert.rejects(s.orders.create(wallet, 'pokemon_25'), /paused/);
   await s.db.close();
 });

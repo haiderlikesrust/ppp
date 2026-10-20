@@ -96,6 +96,8 @@ export class Chain {
       if (job.status !== 'retryable') throw new PendingOperation('Waiting for the previous transaction to settle.');
     }
     if (!job?.data.raw) {
+      // A transaction that keeps failing the same way must reach a human, not loop forever.
+      if ((job?.data.attempts?.length ?? 0) >= 3) throw new ReviewRequired(`This ${kind} failed 3 times: ${job?.data.attempts?.at(-1)?.error ?? 'unknown error'}`);
       const tx = await build(); if (policy.kind !== 'internal') await this.validateExternal(tx, policy, settings);
       tx.sign([signer]); const signature = bs58.encode(tx.signatures[0]);
       const data = { ...(job?.data ?? {}), raw: Buffer.from(tx.serialize()).toString('base64'), signature, blockhash: tx.message.recentBlockhash };

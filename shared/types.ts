@@ -31,8 +31,8 @@ export type Settings = {
   };
   /** Pauses a pack price when trailing rebates exceed this share of its pool fee income. */
   breaker: { lossRatioBps: number; minPacks: number; windowDays: number };
-  /** Pack prices paused by an admin or by the loss-ratio breaker. */
-  pausedPrices: number[];
+  /** Pack machine codes paused by an admin or by the loss-ratio breaker. */
+  pausedPacks: string[];
   /** Daily creator-fee income the fee guardrail may count on (USD). */
   creatorFeeBudgetUsdPerDay: number;
   /** Creator fees are checked every 10 seconds and claimed once at least this much (USD) has built up. 0 = any amount. */
@@ -62,14 +62,16 @@ export type Quote = {
 export type OrderStatus = 'awaiting_payment' | 'paying' | 'paid' | 'buying' | 'delivering' | 'settling' | 'refunding' | 'complete' | 'refunded' | 'expired' | 'review';
 
 export type OrderView = {
-  id: string; status: OrderStatus; wallet: string; priceUsd: number; feeUsd: number; totalUsd: number;
+  id: string; status: OrderStatus; wallet: string; packCode: string; priceUsd: number; feeUsd: number; totalUsd: number;
   coverageBps: number; maxRebateUsd: number; card: Card | null; valueUsd: number | null; rebateUsd: number | null;
   paymentSignature: string | null; rebateSignature: string | null; refundSignature: string | null; nftSignature: string | null;
   message: string | null; createdAt: number;
+  /** Set once the card was quick-sold back to Collector Crypt. */
+  sale: { amountUsd: number; signature: string } | null;
 };
 
 export type ClaimCandidate = {
-  memo: string; signature: string; priceUsd: number; valueUsd: number | null; pulledAt: number;
+  memo: string; signature: string; packCode: string; priceUsd: number; valueUsd: number | null; pulledAt: number;
   card: { mint: string; name: string | null; image: string | null } | null;
   eligible: boolean; reason: string | null; coverageBps: number; rebateUsd: number;
   claim: { status: string; rebateUsd: number; signature: string | null } | null;
@@ -80,7 +82,7 @@ export type PoolView = {
   balanceUsd: number; reservedUsd: number; freeUsd: number; queuedUsd: number; healthBps: number;
   pendingFeeTransferUsd: number; burnBucketUsd: number;
   totals: { creatorFeesUsd: number; feeShareUsd: number; onsiteRebatesUsd: number; offsiteRebatesUsd: number; networkFeesUsd: number; burnedUsd: number; packsOpened: number; claimsPaid: number };
-  byPrice: { priceUsd: number; packs: number; feesToPoolUsd: number; rebatesUsd: number; lossRatioBps: number | null; paused: boolean }[];
+  byPack: { code: string; priceUsd: number; packs: number; feesToPoolUsd: number; rebatesUsd: number; lossRatioBps: number | null; paused: boolean }[];
   recentBurns: { id: string; usdcUsd: number; tokens: string; signature: string | null; createdAt: number }[];
 };
 

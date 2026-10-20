@@ -1,9 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { FlaskConical, LogOut, Menu, Wallet as WalletIcon, X } from 'lucide-react';
-import type { HolderView } from '../../shared/types';
-import { api, short } from './api';
-import { forget, signIn, useWallets } from './wallet';
-import { Logo, Modal, Toast } from './ui';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type Ref } from 'react';
+import { BookOpen, FlaskConical, LogOut, Package, ScanSearch, Settings2, Vault, Wallet as WalletIcon, type LucideIcon } from 'lucide-react';
+import type { HolderView, PoolView } from '../../shared/types';
+import { api, money, short } from './api';
+import { forget, onAccountSwitch, signIn, useWallets } from './wallet';
+import { Logo, Modal, Toast, Wordmark } from './ui';
 import { OpenPage } from './pages/open';
 import { ClaimPage } from './pages/claim';
 import { PoolPage } from './pages/pool';
@@ -20,9 +20,13 @@ const AppContext = createContext<Ctx>(null as any);
 export const useApp = () => useContext(AppContext);
 
 export function navigate(path: string) { history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')); scrollTo({ top: 0 }); }
-export function Link({ href, className, children }: { href: string; className?: string; children: React.ReactNode }) {
-  return <a href={href} className={className} onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(href); }}>{children}</a>;
+export function Link({ href, className, children, ref }: { href: string; className?: string; children: React.ReactNode; ref?: Ref<HTMLAnchorElement> }) {
+  return <a ref={ref} href={href} className={className} onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(href); }}>{children}</a>;
 }
+
+type NavItem = [href: string, label: string, icon: LucideIcon];
+
+const TITLES: Record<string, string> = { '/claim': 'Claim', '/pool': 'Vault', '/how-it-works': 'How it works', '/docs': 'How it works', '/admin': 'Admin' };
 
 export function App() {
   const [path, setPath] = useState(location.pathname);
@@ -31,12 +35,12 @@ export function App() {
   const [picker, setPicker] = useState(false);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const [menu, setMenu] = useState(false);
-  // Bumped whenever practice tools change state, so pages reload their data.
+  // Bumped whenever practice tools or sign-in change state, so pages reload their data.
   const [version, setVersion] = useState(0);
   const wallets = useWallets();
 
   const refresh = useCallback(async () => { setMe(await api<Me>('/me')); }, []);
+  const notify = useCallback((message: string) => setNotice(message), []);
   useEffect(() => { const on = () => setPath(location.pathname); window.addEventListener('popstate', on); return () => window.removeEventListener('popstate', on); }, []);
   useEffect(() => {
     refresh().catch(() => {});
@@ -46,88 +50,118 @@ export function App() {
     loadConfig();
     return () => clearTimeout(timer);
   }, [refresh]);
-  useEffect(() => {
-    const titles: Record<string, string> = { '/claim': 'Claim a loss', '/pool': 'Pool', '/docs': 'How it works', '/admin': 'Admin' };
-    document.title = titles[path] ? `${titles[path]} · Pull Protection` : 'Pull Protection · Rip packs. Lose less.';
-  }, [path]);
-  const notify = useCallback((message: string) => setNotice(message), []);
-  // The mobile menu closes on navigation and on Escape.
-  useEffect(() => setMenu(false), [path]);
-  useEffect(() => {
-    if (!menu) return;
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && setMenu(false);
-    window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
-  }, [menu]);
+  useEffect(() => { document.title = TITLES[path] ? `${TITLES[path]} · Pullback` : 'Pullback · Bad pull? Pull back.'; }, [path]);
+
+  const logout = useCallback(async (message?: string) => {
+    forget();
+    try { await api('/auth/logout', {}); } catch (e) { notify((e as Error).message); }
+    await refresh().catch(() => {}); setVersion(v => v + 1);
+    if (message) notify(message);
+  }, [notify, refresh]);
+  // Switching accounts in the wallet signs out the old one rather than failing later at payment.
+  useEffect(() => onAccountSwitch(() => { void logout('Your wallet switched accounts. Connect again to use the new one.'); }), [logout]);
 
   async function connectWith(wallet?: any) {
     setBusy(true);
     try { if (wallet) await signIn(wallet); else await api('/practice/login', {}); setPicker(false); await refresh(); setVersion(v => v + 1); }
     catch (e) { notify((e as Error).message); } finally { setBusy(false); }
   }
-  async function logout() { await api('/auth/logout', {}); forget(); await refresh(); setVersion(v => v + 1); }
 
-  const nav = [['/', 'Open packs'], ['/claim', 'Claim'], ['/pool', 'Pool'], ['/docs', 'Docs'], ...(me.owner ? [['/admin', 'Admin']] : [])];
-  const page = path === '/claim' ? <ClaimPage /> : path === '/pool' ? <PoolPage /> : path === '/docs' ? <DocsPage /> : path === '/admin' ? <AdminPage /> : <OpenPage />;
+  const nav: NavItem[] = [['/', 'Packs', Package], ['/claim', 'Claim', ScanSearch], ['/pool', 'Vault', Vault], ['/how-it-works', 'How it works', BookOpen], ...(me.owner ? [['/admin', 'Admin', Settings2] as NavItem] : [])];
+  const active = path === '/docs' ? '/how-it-works' : nav.some(([href]) => href === path) ? path : '/';
+  const page = path === '/claim' ? <ClaimPage /> : path === '/pool' ? <PoolPage /> : path === '/how-it-works' || path === '/docs' ? <DocsPage /> : path === '/admin' ? <AdminPage /> : <OpenPage />;
   const tier = me.holder?.tier;
+  const practice = config?.mode === 'practice';
 
   return <AppContext.Provider value={{ me, config, refresh, connect: () => setPicker(true), notify, version, bump: () => setVersion(v => v + 1) }}>
-    <header className="sticky top-0 z-40 border-b border-line bg-bg/90 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 md:h-16 md:gap-6 md:px-6">
-        <Link href="/" className="flex shrink-0 items-center gap-2 font-semibold tracking-tight"><Logo size={26} /><span className="hidden min-[380px]:inline">Pull Protection</span></Link>
-        <nav aria-label="Main" className="hidden items-center gap-1 lg:flex">
-          {nav.map(([href, label]) => <Link key={href} href={href} className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm transition ${path === href ? 'bg-ink text-white' : 'text-muted hover:text-ink'}`}>{label}</Link>)}
-        </nav>
-        <div className="ml-auto flex items-center gap-1.5">
-          {config?.mode === 'practice' && <span className="chip hidden bg-yellow-soft text-ink lg:inline-flex"><FlaskConical size={13} />Practice</span>}
+    <header data-app-chrome className="sticky top-0 z-40 bg-bg/90 backdrop-blur">
+      <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
+        <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="Pullback home"><Logo size={26} /><span className="hidden min-[400px]:inline"><Wordmark size="text-base" /></span></Link>
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          {practice && <span className="tag hidden bg-volt-soft text-volt md:inline-flex"><FlaskConical size={12} />Practice</span>}
           <ContractAddress variant="chip" className="hidden xl:flex" />
-          <XLink variant="icon" className="hidden lg:grid" />
+          <XLink variant="icon" className="hidden sm:grid" />
           {me.wallet
-            ? <span className="flex h-9 items-center gap-2 whitespace-nowrap rounded-full border border-line px-3 text-sm" title={me.wallet}><span className={`size-2 rounded-full ${tier ? 'bg-grass' : 'bg-faint'}`} /><span className="num">{short(me.wallet)}</span></span>
-            : <button className="btn btn-ink btn-sm" onClick={() => setPicker(true)}><WalletIcon size={15} />Connect</button>}
-          {me.wallet && <button className="hidden size-9 place-items-center rounded-full text-muted hover:bg-line/60 hover:text-ink lg:grid" onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>}
-          <button className="grid size-10 place-items-center rounded-full hover:bg-line/60 lg:hidden" onClick={() => setMenu(m => !m)} aria-label={menu ? 'Close menu' : 'Open menu'} aria-expanded={menu} aria-controls="mobile-menu">
-            {menu ? <X size={20} /> : <Menu size={20} />}
-          </button>
+            ? <span className="pixel num flex h-9 min-w-0 items-center gap-2 whitespace-nowrap rounded-md border border-line bg-surface px-3 text-xs" title={`${me.wallet}${tier ? ` · ${tier.name}` : ''}`}><i className={`size-2 shrink-0 ${tier ? 'bg-gain' : 'bg-faint'}`} />{short(me.wallet)}{tier && <span className="hidden text-muted sm:inline">· {tier.name}</span>}</span>
+            : <button className="btn btn-primary btn-sm" onClick={() => setPicker(true)}><WalletIcon size={15} />Connect</button>}
+          {me.wallet && <button className="grid size-9 shrink-0 place-items-center rounded-md text-muted hover:bg-raised hover:text-ink" onClick={() => logout()} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>}
         </div>
       </div>
-      {menu && <nav id="mobile-menu" aria-label="Main" className="rise mx-auto max-w-6xl border-t border-line px-4 pb-4 pt-2 md:px-6 lg:hidden">
-        {nav.map(([href, label]) => <Link key={href} href={href} className={`flex h-12 items-center justify-between rounded-xl px-3 text-base ${path === href ? 'bg-ink font-semibold text-white' : 'hover:bg-line/50'}`}>{label}{path === href && <span className="size-1.5 rounded-full bg-red" />}</Link>)}
-        <XLink variant="row" />
-        <ContractAddress variant="row" className="mt-3 border-t border-line px-3 pt-3" />
-        <div className="mt-3 flex items-center gap-3 border-t border-line px-3 pt-4 text-sm">
-          {me.wallet ? <>
-            <div className="min-w-0 flex-1"><div className="num truncate">{short(me.wallet)}</div><div className="text-xs text-muted">{tier ? `${tier.name} tier` : 'No tier yet'}{config?.mode === 'practice' ? ' · practice wallet' : ''}</div></div>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setMenu(false); void logout(); }}><LogOut size={14} />Sign out</button>
-          </> : <button className="btn btn-ink w-full" onClick={() => { setMenu(false); setPicker(true); }}><WalletIcon size={16} />Connect wallet</button>}
-        </div>
-      </nav>}
+      <NavStrip items={nav} active={active} />
     </header>
-    {menu && <div className="fixed inset-0 z-30 bg-ink/20 lg:hidden" onClick={() => setMenu(false)} aria-hidden="true" />}
 
-    <main className="mx-auto max-w-6xl px-4 pb-24 sm:px-6">{page}</main>
+    <main data-app-chrome className="mx-auto max-w-6xl px-4 pb-24 sm:px-6">{page}</main>
 
-    <footer className="border-t border-line">
-      <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-xs leading-relaxed text-muted sm:flex-row sm:px-6">
-        <div className="grid w-full min-w-0 grid-cols-1 content-start gap-2 sm:w-auto sm:flex-1">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2"><span className="flex items-center gap-2 font-semibold text-ink"><Logo size={18} />Pull Protection</span><Link href="/docs" className="underline-offset-2 hover:text-ink hover:underline">How it works</Link><Link href="/pool" className="underline-offset-2 hover:text-ink hover:underline">Pool</Link><XLink variant="inline" /></div>
-          <ContractAddress variant="row" className="max-w-md text-ink" />
+    <footer data-app-chrome className="border-t border-line">
+      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm sm:px-6 md:grid-cols-[1.2fr_1fr_1.6fr]">
+        <div className="min-w-0">
+          <Link href="/" className="flex items-center gap-2.5"><Logo size={24} /><Wordmark size="text-base" /></Link>
+          <p className="mt-3 text-muted">Bad pull? Pull back. Loss rebates on Collector Crypt packs, Pokémon cards and watches, paid in USDC on Solana.</p>
         </div>
-        <p className="sm:ml-auto sm:max-w-xl sm:text-right">A discretionary loss rebate for holders, not insurance and not a guarantee. Rebates depend on the pool balance and the published rules. Card values are Collector Crypt insured values at the time of the pull. Not affiliated with Nintendo, The Pokémon Company or Collector Crypt.</p>
+        <div className="grid content-start gap-2">
+          <div className="label">Explore</div>
+          {nav.filter(([href]) => href !== '/admin').map(([href, label]) => <Link key={href} href={href} className="w-fit text-muted hover:text-ink">{label}</Link>)}
+          <XLink variant="inline" className="text-muted" />
+        </div>
+        <div className="grid min-w-0 content-start gap-3">
+          <div className="label">Fine print</div>
+          <p className="text-xs leading-relaxed text-muted">A discretionary loss rebate for token holders, not insurance and not a guarantee. Rebates come from the pool under the published rules. Card values are Collector Crypt's insured values at the time of the pull. Not affiliated with Nintendo, The Pokémon Company or Collector Crypt.</p>
+          <ContractAddress variant="row" className="max-w-md" />
+        </div>
+      </div>
+      <div className="border-t border-line">
+        <div className="pixel mx-auto flex max-w-6xl justify-between px-4 py-3 text-[11px] uppercase text-faint sm:px-6"><span>Pullback</span><span>{config?.mode === 'mainnet' ? 'Solana mainnet' : practice ? 'Practice mode' : 'Pre-launch'}</span></div>
       </div>
     </footer>
 
     <Modal open={picker} onClose={() => setPicker(false)} label="Connect your wallet">
-      <Logo size={36} />
-      <h2 className="mt-4 text-xl font-semibold">Connect your wallet</h2>
+      <Logo size={34} />
+      <h2 className="pixel mt-4 text-xl">Connect your wallet</h2>
       <p className="mt-1 text-sm text-muted">You'll sign a message to prove the wallet is yours. Signing in never approves a transaction.</p>
       <div className="mt-5 grid gap-2">
-        {wallets.map(w => <button key={w.name} disabled={busy} className="btn btn-ghost h-12 justify-start rounded-2xl" onClick={() => connectWith(w)}><img src={w.icon} alt="" width={24} height={24} className="rounded-md" />{w.name}</button>)}
-        {!wallets.length && config?.mode !== 'practice' && <p className="text-sm text-muted">No Solana wallet found. Install <a className="font-semibold text-blue underline" href="https://phantom.com" target="_blank" rel="noreferrer">Phantom</a> or <a className="font-semibold text-blue underline" href="https://solflare.com" target="_blank" rel="noreferrer">Solflare</a>, then reload.</p>}
-        {config?.mode === 'practice' && <button disabled={busy} className="btn btn-red h-12 rounded-2xl" onClick={() => connectWith()}><FlaskConical size={16} />Use a practice wallet</button>}
+        {wallets.map(w => <button key={w.name} disabled={busy} className="btn btn-quiet h-12 justify-start" onClick={() => connectWith(w)}><img src={w.icon} alt="" width={24} height={24} className="rounded" />{w.name}</button>)}
+        {!wallets.length && !practice && <p className="text-sm text-muted">No Solana wallet found. Install <a className="font-semibold text-volt underline" href="https://phantom.com" target="_blank" rel="noreferrer">Phantom</a> or <a className="font-semibold text-volt underline" href="https://solflare.com" target="_blank" rel="noreferrer">Solflare</a>, then reload.</p>}
+        {practice && <button disabled={busy} className="btn btn-primary h-12" onClick={() => connectWith()}><FlaskConical size={16} />Use a practice wallet</button>}
       </div>
     </Modal>
 
-    {config?.mode === 'practice' && me.wallet && <PracticeDrawer />}
+    {practice && me.wallet && <PracticeDrawer />}
     <Toast message={notice} onClose={() => setNotice('')} />
   </AppContext.Provider>;
+}
+
+/**
+ * The navigation strip: numbered sections, an accent block with stepped pixel corners that slides to
+ * the active one, and a live vault readout. On phones it becomes an evenly split bar of icons that always fits.
+ */
+function NavStrip({ items, active }: { items: NavItem[]; active: string }) {
+  const { version } = useApp();
+  const links = useRef<Record<string, HTMLAnchorElement | null>>({});
+  const [box, setBox] = useState<{ left: number; width: number } | null>(null);
+  const [pool, setPool] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => { const el = links.current[active]; setBox(el ? { left: el.offsetLeft, width: el.offsetWidth } : null); };
+    measure();
+    document.fonts?.ready.then(measure);
+    window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure);
+  }, [active, items.length]);
+  useEffect(() => {
+    const load = () => { if (!document.hidden) api<PoolView>('/pool').then(p => setPool(p.balanceUsd)).catch(() => {}); };
+    load(); const id = setInterval(load, 30_000); return () => clearInterval(id);
+  }, [version]);
+  return <nav aria-label="Main" className="border-y border-line bg-surface/80">
+    <div className="relative mx-auto grid max-w-6xl px-1.5 md:flex md:items-stretch md:px-4" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+      {box && <span aria-hidden="true" className="nav-block absolute bottom-1 top-1 bg-volt md:bottom-1.5 md:top-1.5" style={{ left: box.left, width: box.width }} />}
+      {items.map(([href, label, Icon], i) => {
+        const on = href === active;
+        return <Link key={href} href={href} ref={el => { links.current[href] = el; }} className={`pixel relative z-[1] flex h-14 min-w-0 flex-col items-center justify-center gap-1 px-1 text-center text-[9px] uppercase leading-tight transition-colors md:h-11 md:shrink-0 md:flex-row md:gap-2 md:whitespace-nowrap md:px-4 md:text-[13px] ${on ? 'text-night' : 'text-muted hover:text-ink'}`}>
+          <Icon size={16} className="md:hidden" aria-hidden="true" />
+          <span className={`hidden text-[10px] md:inline ${on ? 'text-night/55' : 'text-faint'}`}>{String(i + 1).padStart(2, '0')}</span>{label}
+        </Link>;
+      })}
+      <div className="ml-auto hidden shrink-0 items-center gap-2.5 pl-6 pr-2 md:flex">
+        <i className="live-dot" /><span className="label">Vault</span><span className="pixel num text-sm text-gain">{money(pool)}</span>
+      </div>
+    </div>
+  </nav>;
 }

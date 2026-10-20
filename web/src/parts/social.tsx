@@ -11,7 +11,7 @@ export function XLogo({ size = 16, className = '' }: { size?: number; className?
 /** `icon`: a round header button. `row`: the mobile menu line. `inline`: a footer link. */
 export function XLink({ variant, className = '' }: { variant: 'icon' | 'row' | 'inline'; className?: string }) {
   const label = `Follow @${X_HANDLE} on X`;
-  if (variant === 'icon') return <a href={X_URL} target="_blank" rel="noreferrer" aria-label={label} title={label} className={`size-9 place-items-center rounded-full text-muted hover:bg-line/60 hover:text-ink ${className}`}><XLogo size={15} /></a>;
-  if (variant === 'row') return <a href={X_URL} target="_blank" rel="noreferrer" className={`flex h-12 items-center gap-3 rounded-xl px-3 text-base hover:bg-line/50 ${className}`}><XLogo size={16} /><span>Follow <span className="font-semibold">@{X_HANDLE}</span></span></a>;
-  return <a href={X_URL} target="_blank" rel="noreferrer" aria-label={label} className={`inline-flex items-center gap-1.5 underline-offset-2 hover:text-ink hover:underline ${className}`}><XLogo size={12} />@{X_HANDLE}</a>;
+  if (variant === 'icon') return <a href={X_URL} target="_blank" rel="noreferrer" aria-label={label} title={label} className={`size-9 place-items-center rounded-md text-muted hover:bg-raised hover:text-ink ${className}`}><XLogo size={15} /></a>;
+  if (variant === 'row') return <a href={X_URL} target="_blank" rel="noreferrer" className={`flex h-12 items-center gap-3 px-4 text-sm hover:text-volt ${className}`}><XLogo size={15} /><span>Follow <span className="font-semibold">@{X_HANDLE}</span></span></a>;
+  return <a href={X_URL} target="_blank" rel="noreferrer" aria-label={label} className={`inline-flex w-fit items-center gap-1.5 hover:text-ink ${className}`}><XLogo size={12} />@{X_HANDLE}</a>;
 }

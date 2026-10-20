@@ -44,6 +44,7 @@ export async function swap(chain: Chain, id: string, inputMint: string, outputMi
     if (BigInt(order.otherAmountThreshold ?? '0') < guaranteed || Number(order.slippageBps) > settings.slippageBps) throw new ReviewRequired('Swap exceeds the configured slippage ceiling.');
     policy.minOutput = guaranteed;
     const tx = VersionedTransaction.deserialize(Buffer.from(order.transaction, 'base64'));
+    if (tx.version !== 0 && tx.version !== 'legacy') throw new Error('No supported swap route (newer transaction format).');
     if (tx.message.header.numRequiredSignatures !== 1) throw new ReviewRequired('Swap requires an unsupported co-signer.');
     return tx;
   }, settings, policy);

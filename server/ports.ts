@@ -12,7 +12,13 @@ export type BuiltPayment = { intent: PaymentIntent; transaction: string; blockha
 export interface PackProvider {
   machines(): Promise<PackMachine[]>;
   /** Resumable and idempotent per purchase id. Buys with the OPS wallet. */
-  buy(purchaseId: string, priceUsd: number): Promise<PurchaseResult>;
+  buy(purchaseId: string, code: string, priceUsd: number): Promise<PurchaseResult>;
+  /** Collector Crypt's live sell-back offer for a card still inside its 72-hour window. */
+  buybackQuote(mint: string): Promise<{ available: boolean; amountMicros: number | null; expiresAt: number | null }>;
+  /** A sell-back transaction for the card's owner to sign: the card goes to Collector Crypt, USDC to the owner. */
+  buyback(owner: string, mint: string): Promise<{ transaction: string; amountMicros: number }>;
+  /** Hands the owner-signed sale to Collector Crypt and returns its transaction signature. */
+  submitBuyback(signedBase64: string): Promise<string>;
   /** Raw `/pack/status?memo=` response. */
   status(memo: string): Promise<any>;
   asset(mint: string): Promise<{ name: string | null; image: string | null } | null>;

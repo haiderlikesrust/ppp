@@ -4,7 +4,7 @@ import { setup, settle, user } from './helpers';
 
 test('fee shares move to the pool, the burn share is bought back and burned, and the pool view adds up', async () => {
   const s = await setup({ feeTransferThresholdUsd: 1, burnThresholdUsd: 1 }), { wallet } = await user(s);
-  const { order } = await s.orders.create(wallet, 25);
+  const { order } = await s.orders.create(wallet, 'pokemon_25');
   await s.orders.pay(wallet, order.id, 'practice');
   const done = await settle(s, order.id);
   assert.equal(done.status, 'complete');

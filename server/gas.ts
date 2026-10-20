@@ -101,6 +101,8 @@ export class Gas {
     }
 
     if (BigInt(d.send) > 0n && !d.sent) {
+      // Until the transfer is signed its amount can still follow POOL's balance, so a shrinking balance can't wedge the cycle.
+      if (d.sendLamports && !(await this.jobs.get(`${cycle.id}:send`))?.data?.signature) delete d.sendLamports;
       if (!d.sendLamports) {
         // Fix the amount before signing so a resumed cycle sends exactly the same transfer.
         const spare = (await this.solana.solBalance('pool')) - lamports(s.gasReserveSol);

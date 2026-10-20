@@ -23,7 +23,7 @@ test('health checks the database and stays available under frequent probes', asy
     unavailable = true;
     const failure = await app.inject('/api/health');
     assert.equal(failure.statusCode, 503);
-    assert.deepEqual(failure.json(), { ok: false, service: 'pull-protection' });
+    assert.deepEqual(failure.json(), { ok: false, service: 'pullback' });
     unavailable = false;
     const ok = (await app.inject('/api/health')).json();
     assert.equal(ok.spendingEnabled, false);

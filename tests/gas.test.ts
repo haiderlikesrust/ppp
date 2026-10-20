@@ -54,10 +54,10 @@ test('USDC spent on SOL stays inside the daily cap', async () => {
 test('an empty OPS wallet blocks new orders and pauses paid ones instead of sending them to review', async () => {
   const s = await setup(), { wallet } = await user(s);
   s.solana.sol.set('ops', 0n);
-  await assert.rejects(s.orders.create(wallet, 25), /network fees/);
+  await assert.rejects(s.orders.create(wallet, 'pokemon_25'), /network fees/);
   s.solana.sol.set('ops', SOL);
   (s.gas as unknown as { ops: null }).ops = null;
-  const { order } = await s.orders.create(wallet, 25);
+  const { order } = await s.orders.create(wallet, 'pokemon_25');
   await s.orders.pay(wallet, order.id, 'practice');
   await s.orders.step();
   s.solana.sol.set('ops', 0n);

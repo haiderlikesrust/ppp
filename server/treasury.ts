@@ -56,7 +56,7 @@ export class Treasury {
       await this.db.query('INSERT INTO burns(id,usdc_micros,tokens,swap_signature,burn_signature,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING', [job.id, amount, result.tokens.toString(), result.swapSignature, result.burnSignature, Date.now()]);
       await this.jobs.put(job.id, job.kind, 'complete', { ...job.data, ...result, tokens: result.tokens.toString() });
     });
-    return { amount, tokens: result.tokens };
+    return { amount, tokens: result.tokens.toString() };
   }
 
   /** Backoff after errors, so a stuck swap is retried calmly and logged once per distinct error. */

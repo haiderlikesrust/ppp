@@ -66,7 +66,7 @@ export class Claims {
 
   async evaluate(wallet: string, activatedAt: number, p: CcPayment, health?: number, today?: { count: number; nextAt: number | null }): Promise<ClaimCandidate> {
     const s = this.settings.current;
-    const base: ClaimCandidate = { memo: p.memo, signature: p.signature, priceUsd: usd(p.priceMicros), valueUsd: null, pulledAt: p.blockTime, card: null, eligible: false, reason: null, coverageBps: 0, rebateUsd: 0, claim: null };
+    const base: ClaimCandidate = { memo: p.memo, signature: p.signature, packCode: `pokemon_${usd(p.priceMicros)}`, priceUsd: usd(p.priceMicros), valueUsd: null, pulledAt: p.blockTime, card: null, eligible: false, reason: null, coverageBps: 0, rebateUsd: 0, claim: null };
     const no = (reason: string, extra: Partial<ClaimCandidate> = {}) => ({ ...base, ...extra, reason });
     const existing = (await this.db.query<ClaimRow>('SELECT * FROM claims WHERE memo=$1', [p.memo])).rows[0];
     if (existing) return { ...base, valueUsd: existing.wallet === wallet ? usd(Number(existing.value_micros)) : null, reason: existing.wallet === wallet ? 'Already claimed.' : 'Claimed by another wallet.', claim: existing.wallet === wallet ? { status: existing.status, rebateUsd: usd(Number(existing.rebate_micros)), signature: existing.signature } : null };
@@ -77,7 +77,7 @@ export class Claims {
     const problem = ccRecordProblem(status, wallet, p);
     const valueMicros = problem ? null : micros(Number(status.send.insured_value));
     const card = status?.send?.nft_address ? { mint: status.send.nft_address as string, name: null, image: null } : null;
-    const known = { card, valueUsd: valueMicros === null ? null : usd(valueMicros) };
+    const known = { card, valueUsd: valueMicros === null ? null : usd(valueMicros), packCode: (status?.pack?.pack_type as string | undefined) ?? base.packCode };
     if (problem) return no(problem, known);
     if (valueMicros! >= p.priceMicros) return no('This pull was worth at least what you paid.', known);
     if (!s.offsite.enabled || s.paused) return no('Off-site claims are paused right now.', known);
@@ -124,7 +124,7 @@ export class Claims {
       if (unpaid + rebate > backlogCap) throw new Error('You already have claims waiting to be paid. Claim this one after they pay out.');
       const now = Date.now();
       const inserted = await this.db.query('INSERT INTO claims(memo,wallet,status,price_micros,value_micros,coverage_bps,rebate_micros,pulled_at,created_at,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(memo) DO NOTHING RETURNING memo',
-        [memo, wallet, 'approved', payment.priceMicros, micros(candidate.valueUsd!), candidate.coverageBps, rebate, payment.blockTime, now, JSON.stringify({ signature: payment.signature, nft: candidate.card?.mint })]);
+        [memo, wallet, 'approved', payment.priceMicros, micros(candidate.valueUsd!), candidate.coverageBps, rebate, payment.blockTime, now, JSON.stringify({ signature: payment.signature, nft: candidate.card?.mint, packType: candidate.packCode })]);
       if (!inserted.rows.length) throw new Error('This pack has already been claimed.');
       await audit(this.db, 'claim-approved', { memo, wallet, rebateUsd: candidate.rebateUsd });
       return { ...candidate, eligible: false, reason: 'Claim approved.', claim: { status: 'approved', rebateUsd: candidate.rebateUsd, signature: null } };
@@ -145,11 +145,20 @@ export class Claims {
   async step() {
     const s = this.settings.current;
     if (s.paused || !s.offsite.enabled || !this.solana.canSpend) return 0;
-    const rows = (await this.db.query<ClaimRow>("SELECT * FROM claims WHERE status IN ('approved','queued','paying') ORDER BY created_at LIMIT 500")).rows;
+    const all = (await this.db.query<ClaimRow>("SELECT * FROM claims WHERE status IN ('approved','queued','paying') ORDER BY created_at LIMIT 500")).rows;
+    // Payouts already sent settle first, so a cap that stops the queue below can't strand them.
+    const rows = [...all.filter(r => r.status === 'paying'), ...all.filter(r => r.status !== 'paying')];
+    const cap = offsiteRebateCapMicros(s);
     const capped = new Set<string>();
     let paid = 0;
     for (const row of rows) {
-      const amount = Number(row.rebate_micros);
+      let amount = Number(row.rebate_micros);
+      if (row.status !== 'paying' && amount > cap) {
+        // The owner lowered a limit after approval: pay what the limit allows rather than queue forever.
+        await this.db.query('UPDATE claims SET rebate_micros=$2 WHERE memo=$1', [row.memo, cap]);
+        await audit(this.db, 'claim-capped', { memo: row.memo, from: amount, to: cap });
+        amount = cap;
+      }
       if (row.status !== 'paying') {
         if (capped.has(row.wallet)) continue;
         if (Date.now() - Number(row.created_at) > 120_000 && !(await this.stillHolds(row))) {

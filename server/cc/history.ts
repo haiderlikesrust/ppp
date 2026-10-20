@@ -1,4 +1,5 @@
 import type { ParsedTransactionWithMeta } from '@solana/web3.js';
+import { packDef } from '../../shared/packs';
 import type { CcPayment } from '../ports';
 
 export const CC_OPEN_MEMO = /^(cc-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}):open$/;
@@ -38,7 +39,9 @@ export function ccRecordProblem(status: any, wallet: string, payment: CcPayment)
   if (pack.turbo === true || pack.turbo_mode === true) return 'Turbo-mode packs are sold back instantly and are not covered.';
   if (pack.wallet !== wallet) return 'This pack was bought by a different wallet.';
   if (pack.transaction_signature && pack.transaction_signature !== payment.signature) return 'The pack record does not match this payment.';
-  if (pack.pack_type && pack.pack_type !== `pokemon_${price}`) return 'The pack type does not match the amount paid.';
+  const def = packDef(pack.pack_type ?? `pokemon_${price}`);
+  if (!def) return 'This kind of pack is not covered.';
+  if (def.priceUsd !== price) return 'The pack type does not match the amount paid.';
   if (!send || send.status !== 'confirmed' || !send.nft_address) return 'The card has not been delivered yet.';
   if (send.to_wallet !== wallet) return 'The card was delivered to a different wallet.';
   const value = Number(send.insured_value);

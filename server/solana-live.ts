@@ -71,6 +71,8 @@ export class LiveSolana implements Solana {
     try { await this.requireRpc().sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 }); }
     catch (error) {
       const message = (error as Error).message;
+      // The wallet broadcast it too: the payment is on its way, not failed.
+      if (/already been processed/i.test(message)) return bs58.encode(tx.signatures[0]);
       throw Object.assign(new Error(paymentFailure(message), { cause: message }), { statusCode: 400 });
     }
     return bs58.encode(tx.signatures[0]);
@@ -79,10 +81,12 @@ export class LiveSolana implements Solana {
   /** Finds a payment the wallet broadcast itself, by its unique reference key. */
   private async findByReference(intent: PaymentIntent) {
     const rpc = this.requireRpc();
-    const signatures = await rpc.getSignaturesForAddress(new PublicKey(intent.reference), { limit: 10 }, 'confirmed');
+    const signatures = await rpc.getSignaturesForAddress(new PublicKey(intent.reference), { limit: 25 }, 'confirmed');
     for (const s of signatures) {
-      if (s.err) continue;
-      const tx = await rpc.getTransaction(s.signature, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' });
+      // The reference key is public once the payment lands; others' transactions mentioning it are skipped.
+      if (s.err || (s.memo && !s.memo.includes(intent.memo))) continue;
+      let tx;
+      try { tx = await rpc.getTransaction(s.signature, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' }); } catch { continue; }
       if (!tx?.meta || tx.meta.err) continue;
       try { validatePaymentMessage(tx.transaction.message, intent); return s.signature; } catch { /* a look-alike, not our payment */ }
     }

@@ -32,7 +32,7 @@ test('quote prices the fee on top and refuses protection it cannot reserve', () 
   assert.deepEqual([ok.priceMicros, ok.feeMicros, ok.totalMicros, ok.coverageBps, ok.maxRebateMicros, ok.protected], [micros(25), micros(2.5), micros(27.5), 5_000, micros(12.5), true]);
   assert.equal(quote(25, null, DEFAULT_SETTINGS, micros(1_000)).protected, false);
   assert.match(quote(25, t2, DEFAULT_SETTINGS, micros(12)).reason!, /pool is full/);
-  assert.match(quote(25, t2, { ...DEFAULT_SETTINGS, pausedPrices: [25] }, micros(1_000)).reason!, /paused/);
+  assert.match(quote(25, t2, { ...DEFAULT_SETTINGS, pausedPacks: ['pokemon_25'] }, micros(1_000)).reason!, /paused/);
   assert.equal(quote(500, tiers[2], DEFAULT_SETTINGS, micros(1_000)).maxRebateMicros, micros(250), 'liability is capped');
   assert.equal(maxLiability(micros(100), 10_000, micros(250)), micros(100));
 });

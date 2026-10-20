@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Check, Coins, Package, ShieldCheck } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUpRight, Check } from 'lucide-react';
 import type { OrderView, PoolView, Quote } from '../../../shared/types';
 import { ago, api, friendly, money, pct, solscan } from '../api';
 import { Link, useApp } from '../app';
 import { ensureSigner, hasSigner, signPayment } from '../wallet';
 import { CoverageLadder } from '../parts/holder';
 import { ContractAddress } from '../parts/contract';
+import { PackOpening } from '../parts/opening';
 import { XLogo, X_HANDLE, X_URL } from '../parts/social';
-import { Modal, PackArt, RebateBar, SectionTitle, Slab, packStyle } from '../ui';
+import { Booster, Modal, RebateBar, SectionTitle, Slab, isWatch, packStyle } from '../ui';
+import { packDef } from '../../../shared/packs';
+import { useShowcase } from '../showcase';
 
-type Pack = { priceUsd: number; quote: Quote };
-type Activity = { kind: 'onsite' | 'offsite'; wallet: string; priceUsd: number; valueUsd: number; rebateUsd: number; cardName: string | null; at: number };
+type Pack = { code: string; priceUsd: number; quote: Quote };
+type Activity = { kind: 'onsite' | 'offsite'; wallet: string; code: string; priceUsd: number; valueUsd: number; rebateUsd: number; cardName: string | null; at: number };
 const FINAL = ['complete', 'refunded', 'expired', 'review'];
+const IN_PROGRESS = ['paying', 'paid', 'buying', 'delivering', 'settling', 'refunding'];
 
 export function OpenPage() {
   const { me, config, connect, notify, refresh, version } = useApp();
@@ -21,251 +25,345 @@ export function OpenPage() {
   const [activity, setActivity] = useState<Activity[]>([]);
   const [history, setHistory] = useState<OrderView[]>([]);
   const [order, setOrder] = useState<OrderView | null>(null);
-  const [opening, setOpening] = useState<number | null>(null);
+  const [opening, setOpening] = useState<Pack | null>(null);
   const [allActivity, setAllActivity] = useState(false);
-  const timer = useRef<ReturnType<typeof setInterval>>(undefined);
+  const poll = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const following = useRef<string | null>(null), inFlight = useRef(false), aborted = useRef(false);
 
   const load = useCallback(() => {
     setPacksFailed(false);
     api<{ packs: Pack[] }>('/packs').then(r => setPacks(r.packs)).catch(() => setPacksFailed(true));
     api<PoolView>('/pool').then(setPool).catch(() => {});
     api<{ items: Activity[] }>('/activity').then(r => setActivity(r.items)).catch(() => {});
-    if (me.wallet) api<{ orders: OrderView[] }>('/orders').then(r => setHistory(r.orders.filter(o => o.card))).catch(() => {}); else setHistory([]);
-  }, [me.wallet, notify]);
+    if (me.wallet) api<{ orders: OrderView[] }>('/orders').then(r => setHistory(r.orders)).catch(() => {}); else setHistory([]);
+  }, [me.wallet]);
   useEffect(load, [load, version]);
-  useEffect(() => () => clearInterval(timer.current), []);
+  useEffect(() => () => { following.current = null; clearTimeout(poll.current); }, []);
   useEffect(() => {
     const id = setInterval(() => { if (!document.hidden) api<{ items: Activity[] }>('/activity').then(r => setActivity(r.items)).catch(() => {}); }, 20_000);
     return () => clearInterval(id);
   }, []);
 
+  /** Polls one order, one request at a time. A reply for an order we stopped following is dropped. */
   function follow(id: string) {
-    clearInterval(timer.current);
-    timer.current = setInterval(async () => {
-      try { const next = await api<OrderView>(`/orders/${id}`); setOrder(next); if (FINAL.includes(next.status)) { clearInterval(timer.current); load(); refresh(); } }
-      catch { /* keep polling through brief network trouble */ }
-    }, 1000);
+    clearTimeout(poll.current); following.current = id;
+    const tick = async () => {
+      try {
+        const next = await api<OrderView>(`/orders/${id}`);
+        if (following.current !== id) return;
+        setOrder(next);
+        if (FINAL.includes(next.status)) { following.current = null; load(); refresh().catch(() => {}); return; }
+      } catch (e) {
+        if (following.current !== id) return;
+        const status = (e as { status?: number }).status;
+        if (status === 401 || status === 404) { following.current = null; notify('This order can no longer be followed here. Its result shows under Your pulls.'); return; }
+      }
+      poll.current = setTimeout(tick, 1000);
+    };
+    poll.current = setTimeout(tick, 500);
   }
 
   async function open(pack: Pack) {
     if (!me.wallet) return connect();
-    const practice = config?.mode === 'practice' && !hasSigner();
-    // Make sure the signing wallet is ready (and is the signed-in one) before an order reserves anything.
-    if (!practice) {
-      try { await ensureSigner(me.wallet); }
-      catch (e) { notify((e as Error).message); if ((e as { reconnect?: boolean }).reconnect) connect(); return; }
-    }
-    setOpening(pack.priceUsd); setOrder(null);
+    if (inFlight.current) return;
+    inFlight.current = true; aborted.current = false;
+    setOpening(pack); setOrder(null);
     let unpaid: string | null = null;
     try {
-      const { order: created, transaction } = await api<{ order: OrderView; transaction: string }>('/orders', { priceUsd: pack.priceUsd });
-      unpaid = created.id; setOrder(created);
+      const practice = config?.mode === 'practice' && !hasSigner();
+      // Make sure the signing wallet is ready (and is the signed-in one) before an order is created.
+      if (!practice) {
+        try { await ensureSigner(me.wallet); }
+        catch (e) { notify((e as Error).message); if ((e as { reconnect?: boolean }).reconnect) connect(); setOpening(null); return; }
+      }
+      if (aborted.current) return;
+      const { order: created, transaction } = await api<{ order: OrderView; transaction: string }>('/orders', { code: pack.code });
+      unpaid = created.id;
+      if (aborted.current) return;
+      setOrder(created);
       const signed = practice ? 'practice' : await signPayment(transaction);
-      setOrder(await api<OrderView>(`/orders/${created.id}/pay`, { signed }));
+      // Closed while the wallet prompt was open: don't send a payment nobody is watching.
+      if (aborted.current) return;
+      try { setOrder(await api<OrderView>(`/orders/${created.id}/pay`, { signed })); }
+      catch (e) {
+        // A dropped connection can hide a payment that was sent: check before calling it a failure.
+        const check = await api<OrderView>(`/orders/${created.id}`).catch(() => null);
+        if (check && check.status !== 'awaiting_payment') { unpaid = null; setOrder(check); follow(created.id); return; }
+        throw e;
+      }
       unpaid = null;
       follow(created.id);
     } catch (e) {
-      // Release the unpaid order so the buyer can try again straight away.
+      if (!aborted.current) { notify(friendly(e as Error)); setOpening(null); setOrder(null); load(); }
+    } finally {
+      // Release an unpaid order so the buyer can try again straight away.
       if (unpaid) await api(`/orders/${unpaid}/cancel`, {}).catch(() => {});
-      notify(friendly(e as Error)); setOpening(null); setOrder(null); load();
+      inFlight.current = false;
     }
   }
-  const close = () => { clearInterval(timer.current); setOpening(null); setOrder(null); };
 
-  const coverage = me.holder?.tier?.onsiteCoverageBps ?? 5_000;
+  /** Reopens an order that is still going (or just finished) from the pulls list. */
+  function resume(o: OrderView) {
+    const pack = packs?.find(p => p.code === o.packCode) ?? { code: o.packCode, priceUsd: o.priceUsd, quote: { coverageBps: o.coverageBps } as Quote };
+    setOpening(pack); setOrder(o);
+    if (!FINAL.includes(o.status)) follow(o.id);
+  }
+
+  const close = () => {
+    const running = !!order && IN_PROGRESS.includes(order.status);
+    aborted.current = true; following.current = null; clearTimeout(poll.current);
+    setOpening(null); setOrder(null);
+    if (running) notify('Your pack keeps opening in the background. Find it under Your pulls.');
+    load();
+  };
+
+  const s = config?.settings, feeBps: number = s?.feeBps ?? 1_000;
+  const tier = me.holder?.tier;
+  const sample = s?.tiers?.[1] ?? { name: 'Dolphin', onsiteCoverageBps: 5_000 };
+  const covered = tier?.onsiteCoverageBps;
+  const mode = config?.mode;
   return <>
     {/* Hero */}
-    <section className="grid grid-cols-1 items-center gap-10 py-12 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:py-20">
-      <div className="rise">
-        <span className="chip bg-red-soft text-red"><ShieldCheck size={13} />For holders</span>
-        <h1 className="mt-5 text-5xl font-bold leading-[.95] tracking-tight sm:text-6xl md:text-7xl">Rip packs.<br /><span className="text-red">Lose less.</span></h1>
-        <p className="mt-6 max-w-md text-lg text-muted">Open Collector Crypt packs with protection. When a pull is worth less than the pack, part of the difference lands back in your wallet, automatically.</p>
-        <div className="mt-8 grid gap-3 sm:flex sm:flex-wrap">
-          <a href="#packs" className="btn btn-red h-12 px-6">Open a pack<ArrowDown size={16} /></a>
-          <Link href="/claim" className="btn btn-ghost h-12 px-6">Opened one elsewhere?</Link>
-        </div>
-        <ContractAddress variant="hero" className="mt-6" />
-        <div className="mt-10 grid grid-cols-3 gap-4 border-t border-line pt-6 sm:flex sm:gap-x-10">
-          <HeroStat label="In the pool" value={money(pool?.balanceUsd)} />
-          <HeroStat label="Paid back" value={money(pool ? pool.totals.onsiteRebatesUsd + pool.totals.offsiteRebatesUsd : null)} />
-          <HeroStat label="Packs protected" value={pool ? String(pool.totals.packsOpened) : '—'} />
-        </div>
+    <section className="enter flex flex-col items-center py-14 text-center md:py-24">
+      <span className="tag bg-volt-soft text-volt"><i className="live-dot" />{mode === 'mainnet' ? 'Live on Solana' : mode === 'practice' ? 'Practice mode' : 'Launching on Solana'}</span>
+      <h1 className="pixel mt-7 text-[2.3rem] font-bold leading-[1.05] min-[420px]:text-5xl sm:text-6xl md:text-[5.5rem]">BAD PULL?<br /><span className="text-volt">PULL BACK.</span></h1>
+      <p className="mt-7 max-w-xl text-lg text-muted">Open Collector Crypt packs here, Pokémon cards and luxury watches. When a pull comes in under the pack price, part of the loss lands back in your wallet in USDC, automatically.</p>
+      <div className="mt-9 grid w-full gap-3 sm:flex sm:w-auto">
+        <a href="#packs" className="btn btn-primary h-12 px-7">Open a pack<ArrowDown size={16} /></a>
+        <Link href="/claim" className="btn btn-outline h-12 px-7">Opened one elsewhere?</Link>
       </div>
-      <Example coverageBps={coverage} tierName={me.holder?.tier?.name ?? 'Collector'} />
+      <ContractAddress variant="hero" className="mx-auto mt-6" />
+      <div className="card mt-12 grid w-full max-w-3xl grid-cols-1 divide-y divide-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <Readout label="In the pool" value={money(pool?.balanceUsd)} />
+        <Readout label="Paid back" value={money(pool ? pool.totals.onsiteRebatesUsd + pool.totals.offsiteRebatesUsd : null)} tone="text-gain" />
+        <Readout label="Packs protected" value={pool ? String(pool.totals.packsOpened) : '—'} />
+      </div>
     </section>
 
-    {/* Coverage */}
-    <section className="pb-14"><CoverageLadder /></section>
+    {/* Example entry */}
+    <section className="pb-16">
+      <Example feeBps={feeBps} coverageBps={covered ?? sample.onsiteCoverageBps} tierName={tier?.name ?? sample.name} illustrative={!tier} />
+    </section>
 
     {/* Packs */}
-    <section id="packs" className="scroll-mt-24 pb-16">
-      <SectionTitle title="Choose a pack" sub="One graded Pokémon card per pack, straight from Collector Crypt. Prices include protection." />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {(packs ?? []).map(p => <PackCard key={p.priceUsd} pack={p} signedIn={!!me.wallet} busy={opening !== null} onOpen={() => open(p)} />)}
-        {!packs && !packsFailed && [0, 1, 2, 3].map(i => <div key={i} className="card aspect-[3/5] animate-pulse" />)}
-        {!packs && packsFailed && <div className="card col-span-full flex flex-wrap items-center justify-between gap-3 p-6"><div><div className="font-semibold">Packs could not be loaded.</div><div className="text-sm text-muted">Collector Crypt or our server did not answer. Your funds are not affected.</div></div><button className="btn btn-ink" onClick={load}>Try again</button></div>}
+    <section id="packs" className="scroll-mt-32 pb-16">
+      <SectionTitle title="Choose a pack" sub={`One graded Pokémon card or luxury watch per pack, straight from Collector Crypt. Prices include the ${pct(feeBps)} protection fee.`} />
+      {packs && (['pokemon', 'watch'] as const).map(kind => {
+        const list = packs.filter(p => (packDef(p.code)?.kind ?? 'pokemon') === kind);
+        return list.length ? <div key={kind} className="mb-12">
+          <div className="label mb-4 flex items-center gap-2">{kind === 'pokemon' ? 'Pokémon cards' : 'Luxury watches'}<span className="h-px flex-1 bg-line" /></div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">{list.map(p => <PackTile key={p.code} pack={p} signedIn={!!me.wallet} busy={opening !== null} onOpen={() => open(p)} />)}</div>
+        </div> : null;
+      })}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">
+        {!packs && !packsFailed && [0, 1, 2, 3].map(i => <div key={i} className="aspect-[5/7] animate-pulse rounded-md bg-surface" />)}
+        {!packs && packsFailed && <div className="card col-span-full flex flex-wrap items-center justify-between gap-3 p-6"><div><div className="pixel">Packs could not be loaded.</div><div className="text-sm text-muted">Collector Crypt or our server did not answer. Your funds are not affected.</div></div><button className="btn btn-outline" onClick={load}>Try again</button></div>}
         {packs && !packs.length && <div className="card col-span-full p-6 text-sm text-muted">No packs are available on Collector Crypt right now. Check back soon.</div>}
       </div>
     </section>
 
+    <section className="pb-16"><CoverageLadder /></section>
+
     {/* How it works */}
     <section className="pb-16">
-      <SectionTitle title="How it works" action={<Link href="/docs" className="text-sm font-semibold text-blue underline-offset-2 hover:underline">Read the docs</Link>} />
-      <div className="grid gap-4 md:grid-cols-3">
+      <SectionTitle title="Three steps" action={<Link href="/how-it-works" className="pixel text-sm text-volt hover:underline">How it works →</Link>} />
+      <ol className="grid gap-px overflow-hidden rounded-[10px] border border-line bg-line md:grid-cols-3">
         {[
-          [Coins, 'Hold the token', 'Your tier is your lowest balance over the window, so it rewards real holders, not quick flips.'],
-          [Package, 'Open a protected pack', 'Pay once in USDC. We buy the pack on Collector Crypt and send the graded card to your wallet.'],
-          [ShieldCheck, 'Get the difference back', `If the card is worth less than the pack, ${pct(coverage)} of that gap is sent to you right away.`],
-        ].map(([Icon, title, text], i) => { const I = Icon as typeof Coins; return <div key={i} className="card p-6">
-          <div className="flex items-center gap-3"><span className="num grid size-8 place-items-center rounded-full bg-yellow text-sm font-semibold">{i + 1}</span><I size={18} className="text-muted" /></div>
-          <h3 className="mt-4 font-semibold">{title as string}</h3><p className="mt-1.5 text-sm text-muted">{text as string}</p>
-        </div>; })}
-      </div>
+          ['Hold the token', 'Your tier is your lowest balance over the window, so it rewards real holders, not quick flips.'],
+          ['Open a pack here', 'Pay once in USDC. We buy the pack on Collector Crypt and send the graded card to your wallet.'],
+          ['Get part of it back', covered ? `If the card is worth less than the pack, ${pct(covered)} of that gap is sent to you right away.` : 'If the card is worth less than the pack, part of that gap is sent to you right away. Your tier sets how much.'],
+        ].map(([title, text], i) => <li key={title} className="bg-surface p-6">
+          <div className="pixel text-4xl text-volt">0{i + 1}</div>
+          <h3 className="pixel mt-4 text-lg">{title}</h3><p className="mt-1.5 text-sm text-muted">{text}</p>
+        </li>)}
+      </ol>
     </section>
 
     {history.length > 0 && <section className="pb-16">
-      <SectionTitle title="Your pulls" />
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        {history.slice(0, 12).map(o => <div key={o.id}>
-          <Slab card={o.card!} priceUsd={o.priceUsd} />
-          <div className="mt-2 text-center text-xs">{o.rebateUsd ? <span className="font-semibold text-grass">+{money(o.rebateUsd)} back</span> : <span className="text-muted">{money(o.priceUsd)} pack</span>}</div>
-        </div>)}
+      <SectionTitle title="Your pulls" sub="Tap one that's still opening to watch it." />
+      <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-6">
+        {history.slice(0, 12).map(o => <button key={o.id} onClick={() => resume(o)} className="min-w-0 text-left">
+          {o.card ? <Slab card={o.card} priceUsd={o.priceUsd} size="sm" watch={isWatch(o.packCode)} /> : <Booster code={o.packCode} priceUsd={o.priceUsd} className={IN_PROGRESS.includes(o.status) ? 'bob' : 'opacity-50 grayscale'} />}
+          <div className="mt-2 truncate text-center text-xs">{o.sale ? <span className="pixel text-water">Sold {money(o.sale.amountUsd)}</span> : o.rebateUsd ? <span className="pixel text-gain">+{money(o.rebateUsd)}</span> : o.card ? <span className="text-muted">{money(o.priceUsd)} pack</span> : <span className="pixel text-muted">{IN_PROGRESS.includes(o.status) ? 'Opening…' : o.status === 'refunded' ? 'Refunded' : o.status === 'review' ? 'Being checked' : 'Expired'}</span>}</div>
+        </button>)}
       </div>
     </section>}
 
-    <section className="pb-8">
-      <SectionTitle title="Live rebates" sub="Every pull that paid out, on-site and off-site." action={<span className="chip bg-grass-soft text-grass"><span className="live-dot" />Live</span>} />
-      {activity.length ? <div className="card divide-y divide-line overflow-hidden">
-        {activity.slice(0, allActivity ? activity.length : 6).map((a, i) => <div key={`${a.at}-${i}`} className="flex items-center gap-4 px-4 py-3.5 sm:px-5">
-          <span className="size-2.5 shrink-0 rounded-full" style={{ background: packStyle(a.priceUsd).top }} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{a.cardName ? a.cardName.split(' · ').slice(0, 2).join(' · ') : 'Off-site pull'}</div>
-            <div className="truncate text-xs text-muted"><span className="num">{a.wallet}</span> · {money(a.priceUsd)} {packStyle(a.priceUsd).name} pack · worth <span className="num">{money(a.valueUsd)}</span></div>
+    {/* Live rebates */}
+    <section className="pb-16">
+      <SectionTitle title="Live rebates" sub="Every pull that paid out, on-site and off-site." action={<span className="tag bg-gain-soft text-gain"><i className="live-dot" />Live</span>} />
+      {activity.length ? <div className="card overflow-hidden">
+        <div className="hidden grid-cols-[1fr_auto_auto] gap-6 border-b border-line px-5 py-2.5 sm:grid"><span className="label">Pull</span><span className="label">When</span><span className="label w-24 text-right">Back</span></div>
+        {activity.slice(0, allActivity ? activity.length : 6).map((a, i) => <div key={`${a.at}-${i}`} className="grid grid-cols-[1fr_auto] items-center gap-x-6 border-b border-line px-4 py-3 last:border-0 sm:grid-cols-[1fr_auto_auto] sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <i className="size-2.5 shrink-0" style={{ background: packStyle(a.code, a.priceUsd).color }} />
+            <div className="min-w-0">
+              <div className="truncate text-sm">{a.cardName ? a.cardName.split(' · ').slice(0, 2).join(' · ') : 'Opened on Collector Crypt'}</div>
+              <div className="num truncate text-xs text-muted">{a.wallet} · {money(a.priceUsd)} {packStyle(a.code, a.priceUsd).name} · worth {money(a.valueUsd)}</div>
+            </div>
           </div>
-          <div className="shrink-0 text-right">
-            {a.rebateUsd ? <div className="num text-sm font-semibold text-grass">+{money(a.rebateUsd)}</div> : <span className="chip h-5 bg-yellow px-2 text-[11px] text-ink">Hit</span>}
-            <div className="text-xs text-faint">{ago(a.at)}</div>
-          </div>
+          <span className="hidden text-xs text-faint sm:block">{ago(a.at)}</span>
+          <div className="text-right sm:w-24">{a.rebateUsd ? <span className="pixel num text-gain">+{money(a.rebateUsd)}</span> : <span className="tag bg-volt text-night">Hit</span>}<div className="text-[11px] text-faint sm:hidden">{ago(a.at)}</div></div>
         </div>)}
-        {activity.length > 6 && <button className="flex h-11 w-full items-center justify-center gap-1.5 text-sm font-semibold text-muted hover:bg-bg hover:text-ink" onClick={() => setAllActivity(v => !v)}>{allActivity ? 'Show less' : `Show all ${activity.length}`}<ArrowDown size={14} className={allActivity ? 'rotate-180' : ''} /></button>}
+        {activity.length > 6 && <button className="pixel flex h-11 w-full items-center justify-center gap-1.5 border-t border-line text-sm text-muted hover:bg-raised hover:text-ink" onClick={() => setAllActivity(v => !v)}>{allActivity ? 'Show less' : `Show all ${activity.length}`}<ArrowDown size={14} className={allActivity ? 'rotate-180' : ''} /></button>}
       </div> : <div className="card px-5 py-8 text-center text-sm text-muted">No pulls yet. Be the first.</div>}
     </section>
 
     {/* Closing call to action */}
-    <section className="pt-8">
-      <div className="relative overflow-hidden rounded-[1.75rem] bg-ink px-6 py-10 text-white sm:px-10 sm:py-12">
-        <div aria-hidden="true" className="absolute -right-20 -top-20 size-72 rounded-full border-[18px] border-white/[.06] sm:-right-10 sm:size-80"><div className="absolute inset-x-0 top-1/2 h-[18px] -translate-y-1/2 bg-white/[.06]" /><div className="absolute left-1/2 top-1/2 size-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-[18px] border-white/[.06]" /></div>
-        <div className="relative max-w-xl">
-          <h2 className="text-3xl font-bold leading-tight tracking-tight sm:text-4xl">Every pack, with a <span className="text-yellow">safety net.</span></h2>
-          <p className="mt-3 text-white/70">Hold the token, open packs here, and get part of every bad pull back in USDC. Drops, big hits and pool updates go out on X first.</p>
-          <div className="mt-7 grid gap-3 sm:flex sm:flex-wrap">
-            <a href="#packs" className="btn btn-red h-12 px-6">Open a pack<ArrowRight size={16} /></a>
-            <a href={X_URL} target="_blank" rel="noreferrer" className="btn h-12 border border-white/20 px-6 text-white hover:border-white"><XLogo size={15} />Follow @{X_HANDLE}</a>
-          </div>
+    <section className="pt-4">
+      <div className="card relative overflow-hidden border-volt/40 px-6 py-12 text-center sm:px-10">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.07]" style={{ backgroundImage: 'repeating-linear-gradient(0deg, #ffd23f 0 1px, transparent 1px 6px)' }} />
+        <h2 className="pixel relative text-2xl sm:text-4xl">EVERY PACK. <span className="text-volt">A PULLBACK.</span></h2>
+        <p className="relative mx-auto mt-4 max-w-lg text-muted">Hold the token, open packs here, and get part of every bad pull back in USDC. Drops and big hits go out on X first.</p>
+        <div className="relative mt-8 grid gap-3 sm:flex sm:justify-center">
+          <a href="#packs" className="btn btn-primary h-12 px-7">Open a pack<ArrowRight size={16} /></a>
+          <a href={X_URL} target="_blank" rel="noreferrer" className="btn btn-outline h-12 px-7"><XLogo size={15} />Follow @{X_HANDLE}</a>
         </div>
       </div>
     </section>
 
-    <Modal open={opening !== null} onClose={close} dismissable={!order || FINAL.includes(order.status)} width="max-w-2xl" label="Opening your pack">
-      {opening !== null && <OpenFlow priceUsd={opening} order={order} onAgain={() => { const p = packs?.find(x => x.priceUsd === opening); close(); if (p) setTimeout(() => open(p), 50); }} onClose={close} />}
+    <Modal open={opening !== null} onClose={close} width="max-w-2xl" label="Opening your pack">
+      {opening && <OpenFlow pack={opening} order={order} onUpdate={setOrder} onAgain={() => { const p = packs?.find(x => x.code === opening.code); close(); if (p) setTimeout(() => open(p), 50); }} onClose={close} />}
     </Modal>
   </>;
 }
 
-function HeroStat({ label, value }: { label: string; value: string }) {
-  return <div className="min-w-0"><div className="num truncate text-lg font-semibold sm:text-2xl">{value}</div><div className="text-xs text-muted">{label}</div></div>;
+function Readout({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
+  return <div className="flex min-w-0 items-center justify-between gap-4 px-5 py-4 sm:block sm:px-6 sm:py-5"><div className="label truncate">{label}</div><div className={`pixel num truncate text-xl sm:mt-1.5 sm:text-2xl lg:text-3xl ${tone}`}>{value}</div></div>;
 }
 
-/** A worked example at the visitor's own coverage. */
-function Example({ coverageBps, tierName }: { coverageBps: number; tierName: string }) {
-  const price = 25, fee = 2.5, value = 9.3, rebate = Math.floor((price - value) * coverageBps / 100) / 100;
-  return <div className="card rise relative p-6 shadow-[0_30px_80px_-40px_rgb(23_23_28/.35)] sm:p-8">
-    <div className="label">Example pull</div>
-    <div className="mt-4 grid grid-cols-[104px_1fr] gap-4 sm:grid-cols-[130px_1fr] sm:gap-6">
-      <Slab card={{ name: 'Sylveon · Crown Zenith · PSA 9', image: null, insuredValueUsd: value, rarity: 'Common' }} priceUsd={price} />
-      <dl className="grid min-w-0 content-start gap-2.5 text-[13px] sm:text-sm">
-        <Row k="Pack + protection" v={money(price + fee)} />
-        <Row k="Card is worth" v={money(value)} />
-        <Row k="Shortfall" v={money(price - value)} tone="text-red" />
-        <Row k={`${tierName} covers`} v={pct(coverageBps)} />
-        <div className="mt-1 border-t border-line pt-3"><Row k="Back to you" v={`+${money(rebate)}`} big /></div>
-      </dl>
+/** A worked example on a real $25 pull from Collector Crypt, at the visitor's own coverage when they have a tier. */
+function Example({ feeBps, coverageBps, tierName, illustrative }: { feeBps: number; coverageBps: number; tierName: string; illustrative: boolean }) {
+  const real = useShowcase()?.example;
+  const card = real ? { name: real.name, image: real.image, insuredValueUsd: real.insuredValueUsd, rarity: real.rarity } : { name: 'Sylveon · Crown Zenith · PSA 9', image: null, insuredValueUsd: 9.3, rarity: 'Common' };
+  const price = 25, fee = Math.round(price * feeBps) / 10_000, value = card.insuredValueUsd, rebate = Math.floor((price - value) * coverageBps / 100) / 100;
+  return <div className="card overflow-hidden">
+    <div className="flex items-center justify-between border-b border-line bg-raised px-5 py-2.5"><span className="label">{real ? 'A real $25 pull from Collector Crypt' : 'Example pull'}</span><span className="label hidden sm:inline">{illustrative ? `At ${tierName}` : 'Your tier'}</span></div>
+    <div className="grid gap-6 p-5 sm:grid-cols-[150px_1fr] sm:gap-10 sm:p-8">
+      <div className="mx-auto w-[130px] sm:w-[150px]"><Slab card={card} priceUsd={price} /></div>
+      <div className="min-w-0 self-center">
+        <dl className="grid gap-3 text-sm">
+          <div className="leader"><dt className="text-muted">Pack + protection</dt><dd className="pixel num">{money(price + fee)}</dd></div>
+          <div className="leader"><dt className="text-muted">Card is worth</dt><dd className="pixel num">{money(value)}</dd></div>
+          <div className="leader"><dt className="text-muted">Shortfall</dt><dd className="pixel num text-loss">{money(price - value)}</dd></div>
+          <div className="leader"><dt className="text-muted">{tierName} covers</dt><dd className="pixel num">{pct(coverageBps)}</dd></div>
+        </dl>
+        <div className="mt-5 flex items-baseline justify-between border-t border-line pt-4"><span className="pixel">Back to you</span><span className="pixel num text-2xl text-gain sm:text-3xl">+{money(rebate)}</span></div>
+        <div className="mt-5"><RebateBar priceUsd={price} valueUsd={value} rebateUsd={rebate} /></div>
+      </div>
     </div>
-    <div className="mt-6"><RebateBar priceUsd={price} valueUsd={value} rebateUsd={rebate} /></div>
   </div>;
 }
-function Row({ k, v, tone = '', big }: { k: string; v: string; tone?: string; big?: boolean }) {
-  return <div className="flex items-baseline justify-between gap-3"><dt className={`whitespace-nowrap ${big ? 'font-semibold' : 'text-muted'}`}>{k}</dt><dd className={`num font-semibold ${big ? 'text-xl text-grass sm:text-2xl' : tone}`}>{v}</dd></div>;
-}
 
-function PackCard({ pack, signedIn, busy, onOpen }: { pack: Pack; signedIn: boolean; busy: boolean; onOpen: () => void }) {
+function PackTile({ pack, signedIn, busy, onOpen }: { pack: Pack; signedIn: boolean; busy: boolean; onOpen: () => void }) {
   const q = pack.quote, blocked = signedIn && !q.protected;
-  return <article className="group flex flex-col">
-    <PackArt priceUsd={pack.priceUsd} />
+  return <article className="group flex min-w-0 flex-col">
+    <Booster code={pack.code} priceUsd={pack.priceUsd} />
     <div className="mt-4 flex flex-wrap items-baseline justify-between gap-x-2">
-      <span className="num text-lg font-semibold">{money(q.totalMicros / 1e6)}</span>
-      <span className="text-xs text-muted">incl. {money(q.feeMicros / 1e6)} fee</span>
+      <span className="pixel num text-lg">{money(q.totalMicros / 1e6)}</span>
+      <span className="text-[11px] text-muted">incl. {money(q.feeMicros / 1e6)} fee</span>
     </div>
     <div className="mt-1 min-h-10 text-sm">
-      {q.protected ? <span className="text-grass">Up to <b className="num">{money(q.maxRebateMicros / 1e6)}</b> back · {pct(q.coverageBps)}</span>
-        : signedIn ? <span className="text-xs text-red">{q.reason}</span> : <span className="text-muted">Connect to see your coverage</span>}
+      {q.protected ? <span className="text-gain">Up to <b className="num">{money(q.maxRebateMicros / 1e6)}</b> back · {pct(q.coverageBps)}</span>
+        : signedIn ? <span className="text-xs text-loss">{q.reason}</span> : <span className="text-muted">Connect to see your coverage</span>}
     </div>
-    <button className="btn btn-ink mt-3 w-full" disabled={busy || blocked} onClick={onOpen}>{signedIn ? 'Open' : 'Connect to open'}<ArrowRight size={15} /></button>
+    <button className="btn btn-primary mt-3 w-full" disabled={busy || blocked} onClick={onOpen}>{signedIn ? 'Open' : 'Connect to open'}<ArrowRight size={15} /></button>
   </article>;
 }
 
-const STEPS = [{ label: 'Payment', at: ['awaiting_payment', 'paying'] }, { label: 'Opening', at: ['paid', 'buying'] }, { label: 'Card sent', at: ['delivering'] }, { label: 'Rebate', at: ['settling'] }];
+const STEPS = [{ label: 'Pay', at: ['awaiting_payment', 'paying'] }, { label: 'Open', at: ['paid', 'buying'] }, { label: 'Send', at: ['delivering'] }, { label: 'Rebate', at: ['settling'] }];
 
-function OpenFlow({ priceUsd, order, onAgain, onClose }: { priceUsd: number; order: OrderView | null; onAgain: () => void; onClose: () => void }) {
-  const status = order?.status;
+function OpenFlow({ pack, order, onUpdate, onAgain, onClose }: { pack: Pack; order: OrderView | null; onUpdate: (o: OrderView) => void; onAgain: () => void; onClose: () => void }) {
+  const priceUsd = pack.priceUsd, status = order?.status;
   const step = status === 'complete' ? STEPS.length : STEPS.findIndex(s => s.at.includes(status ?? 'awaiting_payment'));
   const revealed = !!order?.card;
-  const failed = status === 'refunded' || status === 'expired' || status === 'review';
+  const failed = status === 'refunded' || status === 'expired' || status === 'review' || status === 'refunding';
   const hit = !!order && order.valueUsd !== null && order.valueUsd >= order.priceUsd;
-  return <div className="relative grid gap-8 sm:grid-cols-[200px_1fr]">
+  const title = status === 'refunding' ? 'Refunding your payment' : status === 'review' ? 'Needs a quick check' : status === 'refunded' ? 'Refunded in full' : status === 'expired' ? 'Payment window closed'
+    : revealed ? order!.card!.name.split(' · ')[0] : !order || status === 'awaiting_payment' ? 'Confirm in your wallet' : 'Opening your pack…';
+  return <div className="relative grid gap-8 sm:grid-cols-[190px_1fr]">
     {status === 'complete' && hit && <Confetti />}
-    <div className="mx-auto w-[170px] sm:w-[200px]">
-      {revealed ? <div className="reveal"><Slab card={order!.card!} priceUsd={priceUsd} /></div> : <PackArt priceUsd={priceUsd} className={status && status !== 'awaiting_payment' ? 'shake' : 'float'} />}
-    </div>
-    <div>
-      <div className="label">{money(priceUsd)} {packStyle(priceUsd).name} pack · {pct(order?.coverageBps ?? 0)} covered</div>
-      <h2 className="mt-1 text-2xl font-semibold tracking-tight">{failed ? (status === 'review' ? 'Needs a quick check' : status === 'refunded' ? 'Refunded in full' : 'Payment window closed') : revealed ? order!.card!.name.split(' · ')[0] : !order || status === 'awaiting_payment' ? 'Confirm in your wallet' : 'Opening your pack…'}</h2>
+    <PackOpening code={pack.code} priceUsd={priceUsd} status={status} card={order?.card ?? null} hit={hit} />
+    <div className="min-w-0">
+      <div className="label">{money(priceUsd)} {packStyle(pack.code, priceUsd).name} pack · {pct(order?.coverageBps ?? pack.quote.coverageBps ?? 0)} covered</div>
+      <h2 className="pixel mt-1.5 text-2xl" aria-live="polite">{title}</h2>
       {revealed && <p className="text-sm text-muted">{order!.card!.name.split(' · ').slice(1).join(' · ')}</p>}
 
-      {!failed && <ol className="mt-5 flex flex-wrap gap-1.5">
-        {STEPS.map((s, i) => <li key={s.label} className={`chip ${i < step ? 'bg-grass-soft text-grass' : i === step ? 'bg-red-soft text-red' : 'bg-bg text-faint'}`}>
-          {i < step ? <Check size={12} /> : i === step ? <span className="dot-pulse" /> : null}{s.label}</li>)}
+      {!failed && <ol className="mt-5 grid grid-cols-4 gap-1.5">
+        {STEPS.map((s, i) => <li key={s.label}>
+          <div className={`h-1.5 rounded-[2px] ${i < step ? 'bg-gain' : i === step ? 'blink bg-volt' : 'bg-raised'}`} />
+          <div className={`pixel mt-1.5 flex items-center gap-1 text-[11px] uppercase tracking-[0.08em] ${i < step ? 'text-gain' : i === step ? 'text-volt' : 'text-faint'}`}>{i < step && <Check size={11} />}{s.label}</div>
+        </li>)}
       </ol>}
 
-      {order && order.valueUsd !== null && !failed && <div className="rise mt-6">
-        <div className="grid grid-cols-3 gap-4">
+      {order && order.valueUsd !== null && !failed && <div className="enter mt-6">
+        <div className="grid grid-cols-3 gap-3">
           <Mini label="You paid" value={money(order.totalUsd)} />
-          <Mini label="Card value" value={money(order.valueUsd)} tone={order.valueUsd >= order.priceUsd ? 'text-grass' : ''} />
-          <Mini label="Back to you" value={hit ? 'Not needed' : order.rebateUsd === null ? '…' : `+${money(order.rebateUsd)}`} tone={hit ? 'text-muted' : 'text-grass'} />
+          <Mini label="Card value" value={money(order.valueUsd)} tone={hit ? 'text-gain' : ''} />
+          <Mini label="Back to you" value={hit ? 'Not needed' : order.rebateUsd === null ? '…' : `+${money(order.rebateUsd)}`} tone={hit ? 'text-muted' : 'text-gain'} />
         </div>
-        {order.rebateUsd !== null && order.valueUsd < order.priceUsd && <div className="mt-5"><RebateBar priceUsd={order.priceUsd} valueUsd={order.valueUsd} rebateUsd={order.rebateUsd} /></div>}
-        {status === 'complete' && order.valueUsd >= order.priceUsd && <p className="mt-4 rounded-2xl bg-yellow-soft px-4 py-3 text-sm font-medium">A hit! This card beat the pack price, so no rebate was needed.</p>}
+        {order.rebateUsd !== null && !hit && <div className="mt-5"><RebateBar priceUsd={order.priceUsd} valueUsd={order.valueUsd} rebateUsd={order.rebateUsd} /></div>}
+        {status === 'complete' && hit && <p className="mt-4 rounded-md border border-volt/40 bg-volt-soft px-4 py-3 text-sm text-volt">A hit! This one beat the pack price, so no rebate was needed.</p>}
       </div>}
 
-      {!(status === 'complete' && hit) && <p className={`mt-4 text-sm ${status === 'review' ? 'text-red' : 'text-muted'}`}>{status === 'review' ? 'Your payment is safe. The team has been alerted and will finish this order.' : order?.message}</p>}
+      {status === 'complete' && order?.card && <QuickSell order={order} onSold={onUpdate} />}
+
+      {!(status === 'complete' && hit) && <p className={`mt-4 text-sm ${status === 'review' ? 'text-loss' : 'text-muted'}`}>{status === 'review' ? 'Your payment is safe. The team has been alerted and will finish this order.' : order?.message}</p>}
 
       <div className="mt-4 flex flex-wrap gap-4 text-xs">
         {([['Payment', order?.paymentSignature], ['Card transfer', order?.nftSignature], ['Rebate', order?.rebateSignature], ['Refund', order?.refundSignature]] as const).filter(([, s]) => s).map(([label, s]) =>
-          <a key={label} className="inline-flex items-center gap-0.5 text-muted underline-offset-2 hover:text-ink hover:underline" href={solscan('tx', s!)} target="_blank" rel="noreferrer">{label}<ArrowUpRight size={12} /></a>)}
+          <a key={label} className="inline-flex items-center gap-0.5 text-muted hover:text-volt" href={solscan('tx', s!)} target="_blank" rel="noreferrer">{label}<ArrowUpRight size={12} /></a>)}
       </div>
 
-      {(status === 'complete' || failed) && <div className="mt-6 flex gap-2">
-        {status === 'complete' && <button className="btn btn-red" onClick={onAgain}>Open another</button>}
-        <button className="btn btn-ghost" onClick={onClose}>Done</button>
-      </div>}
+      <div className="mt-6 flex flex-wrap gap-2">
+        {status === 'complete' && <button className="btn btn-primary" onClick={onAgain}>Open another</button>}
+        <button className="btn btn-outline" onClick={onClose}>{status && FINAL.includes(status) ? 'Done' : 'Close'}</button>
+      </div>
     </div>
   </div>;
 }
-const CONFETTI = ['#e3350d', '#ffcb05', '#2a75bb', '#2f9e4f', '#7b3fe4'];
+
+type SaleQuote = { available: boolean; amountUsd: number | null; expiresAt: number | null };
+
+/** Collector Crypt's sell-back offer for the card just pulled, signed by the buyer's own wallet. */
+function QuickSell({ order, onSold }: { order: OrderView; onSold: (o: OrderView) => void }) {
+  const { config, me, notify } = useApp();
+  const [quote, setQuote] = useState<SaleQuote | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (order.sale) return;
+    api<SaleQuote>(`/orders/${order.id}/sell`).then(setQuote).catch(() => setQuote({ available: false, amountUsd: null, expiresAt: null }));
+  }, [order.id, order.sale]);
+  if (order.sale) return <div className="enter mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md border border-water/40 bg-water/10 px-4 py-3 text-sm">
+    <span>Sold back for <b className="pixel text-water">{money(order.sale.amountUsd)}</b>. The USDC is in your wallet.</span>
+    <a className="inline-flex items-center gap-0.5 text-xs text-muted hover:text-volt" href={solscan('tx', order.sale.signature)} target="_blank" rel="noreferrer">Sale<ArrowUpRight size={12} /></a>
+  </div>;
+  if (!quote?.available || quote.amountUsd === null) return null;
+  async function sell() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const practice = config?.mode === 'practice' && !hasSigner();
+      if (!practice && me.wallet) await ensureSigner(me.wallet);
+      const offer = await api<{ transaction: string; amountUsd: number }>(`/orders/${order.id}/sell`, {});
+      const signed = practice ? offer.transaction : await signPayment(offer.transaction);
+      onSold(await api<OrderView>(`/orders/${order.id}/sell/submit`, { signed }));
+      notify(`Sold for ${money(offer.amountUsd)}.`);
+    } catch (e) { notify(friendly(e as Error)); } finally { setBusy(false); }
+  }
+  const hours = quote.expiresAt ? Math.max(0, Math.round((quote.expiresAt - Date.now()) / 3_600_000)) : null;
+  const share = order.valueUsd ? Math.round(quote.amountUsd / order.valueUsd * 100) : null;
+  return <div className="enter mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-raised p-4">
+    <div className="min-w-0"><div className="label">Quick sell</div><div className="mt-0.5 text-sm text-muted">Sell it back to Collector Crypt{share ? ` at ${share}% of its value` : ''}{hours !== null ? `. Offer open ${hours}h more.` : '.'}</div></div>
+    <button className="btn btn-outline btn-sm" disabled={busy} onClick={sell}>{busy ? 'Selling…' : `Sell for ${money(quote.amountUsd)}`}</button>
+  </div>;
+}
+
+const CONFETTI = ['#ffd23f', '#45d483', '#4aa3ff', '#ff8a4c', '#c77dff'];
 function Confetti() {
   return <div className="confetti" aria-hidden="true">{Array.from({ length: 28 }, (_, i) =>
-    <i key={i} style={{ left: `${(i * 37) % 100}%`, background: CONFETTI[i % CONFETTI.length], animationDelay: `${(i % 7) * 70}ms`, rotate: `${i * 47}deg` }} />)}</div>;
+    <i key={i} style={{ left: `${(i * 37) % 100}%`, background: CONFETTI[i % CONFETTI.length], animationDelay: `${(i % 7) * 70}ms` }} />)}</div>;
 }
 function Mini({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
-  return <div><div className="label">{label}</div><div className={`num mt-1 text-xl font-semibold ${tone}`}>{value}</div></div>;
+  return <div className="min-w-0"><div className="label truncate">{label}</div><div className={`pixel num mt-1 truncate text-sm sm:text-lg ${tone}`}>{value}</div></div>;
 }
