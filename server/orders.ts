@@ -4,6 +4,7 @@ import { Jobs, PendingOperation, ReviewRequired } from './jobs';
 import type { BuiltPayment, PackProvider, Solana } from './ports';
 import type { Holders } from './holders';
 import type { Pool } from './pool';
+import type { Gas } from './gas';
 import type { SettingsStore } from './settings';
 import { ApiError } from './cc/client';
 import { quote, rebateMicros, splitFee, usd, micros } from '../shared/protection';
@@ -15,6 +16,8 @@ const direct: Runner = fn => fn();
 const PAYMENT_WINDOW_MS = 120_000;
 // Transient failures back off up to 5 minutes, so ~40 attempts ride out a couple of hours of
 // provider or RPC trouble before an order is handed to the owner for review.
+/** Order steps where the OPS wallet signs a transaction and so pays network fees. */
+const OPS_SIGNS: OrderStatus[] = ['paid', 'buying', 'delivering', 'refunding'];
 const MAX_FAILURES = 40;
 const backoffMs = (failures: number) => Math.min(300_000, 2_000 * 2 ** Math.min(failures, 8));
 
@@ -44,7 +47,7 @@ type Row = { id: string; wallet: string; status: OrderStatus; price_micros: stri
  * POOL pays the rebate immediately when the card is worth less than the price.
  */
 export class Orders {
-  constructor(readonly db: Database, readonly jobs: Jobs, readonly solana: Solana, readonly packs: PackProvider, readonly holders: Holders, readonly pool: Pool, readonly settings: SettingsStore) {}
+  constructor(readonly db: Database, readonly jobs: Jobs, readonly solana: Solana, readonly packs: PackProvider, readonly holders: Holders, readonly pool: Pool, readonly settings: SettingsStore, readonly gas: Gas) {}
 
   /** A personalized quote for every available pack. */
   async quotes(wallet: string | null) {
@@ -67,6 +70,8 @@ export class Orders {
     const s = this.settings.current;
     if (!this.solana.canSpend) throw new Error('Protected packs open at launch. Nothing was charged.');
     if (s.paused) throw new Error('Protected packs are paused right now.');
+    // OPS signs every step after payment; never take money it could not act on right away.
+    if (!(await this.gas.opsReady())) throw Object.assign(new Error('Pack opening is paused for a minute while network fees are topped up. Nothing was charged.'), { statusCode: 503 });
     if (!(await this.packs.machines()).some(m => m.priceUsd === priceUsd)) throw new Error('That pack is not available right now.');
     const check = await this.holders.onsiteTier(wallet);
     const first = quote(priceUsd, check.tier, s, await this.pool.free());
@@ -157,6 +162,8 @@ export class Orders {
 
   private async advance(row: Row) {
     const d = row.data, price = Number(row.price_micros), fee = Number(row.fee_micros), s = this.settings.current;
+    // Waits for the gas top-up instead of failing (and landing in review) on an empty OPS wallet.
+    if (OPS_SIGNS.includes(row.status) && !(await this.gas.opsReady())) throw new PendingOperation('Topping up network fees. Your order continues automatically.');
     switch (row.status) {
       case 'awaiting_payment':
       case 'paying': {

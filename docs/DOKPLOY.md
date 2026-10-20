@@ -35,7 +35,7 @@ Production never runs practice mode. Without `SOLANA_RPC_URL` the site runs **re
 ## Go live
 
 1. Set `MEMECOIN_MINT`, `OWNER_WALLET`, `SOLANA_RPC_URL` (a paid RPC), `JUPITER_API_KEY` and both wallet keys, and redeploy.
-2. Fund the wallets: SOL for fees in both, a USDC token account in both, and starting USDC in POOL. Make POOL the coin's pump.fun creator-fee recipient (or a fee-sharing shareholder).
+2. Fund the wallets: about 0.3 SOL in POOL (and a little in OPS to start), a USDC token account in both, and starting USDC in POOL. After that POOL keeps OPS topped up with SOL automatically, and buys more SOL with a capped amount of pool USDC when it runs low itself (see **Network fees** in `/admin`). Make POOL the coin's pump.fun creator-fee recipient (or a fee-sharing shareholder).
 3. Open the server container's terminal in Dokploy and run the read-only checks:
    ```sh
    npm run check

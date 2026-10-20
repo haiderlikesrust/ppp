@@ -6,7 +6,8 @@ import { api, money, pct } from '../api';
 import { useApp } from '../app';
 import { Empty, SectionTitle, packStyle } from '../ui';
 
-type Admin = { settings: Settings; version: string; blockers: string[]; problems: string[]; calibration: { generatedAt: string; samples: number; distributions: any[] } | null; review: any[]; jobs: any[]; audit: any[] };
+type Gas = { opsSol: number; poolSol: number; spentTodayUsd: number; opsReady: boolean };
+type Admin = { settings: Settings; version: string; gas: Gas | null; blockers: string[]; problems: string[]; calibration: { generatedAt: string; samples: number; distributions: any[] } | null; review: any[]; jobs: any[]; audit: any[] };
 
 export function AdminPage() {
   const { me, notify, connect, version } = useApp();
@@ -86,6 +87,22 @@ export function AdminPage() {
       </div>
     </Section>
 
+    <Section title="Network fees (SOL)" sub="OPS pays a small SOL fee for every pack it buys, card it sends and refund. POOL tops it up automatically, and buys SOL with a little USDC when it runs low itself.">
+      {data.gas && <div className="mb-5 grid gap-4 sm:grid-cols-3">
+        <GasStat label="OPS wallet" sol={data.gas.opsSol} low={data.gas.opsSol < form.gas.opsMinSol} note={data.gas.opsReady ? undefined : 'Too low to open packs. New orders wait.'} />
+        <GasStat label="POOL wallet" sol={data.gas.poolSol} low={data.gas.poolSol < form.gas.poolMinSol} note={data.gas.poolSol < form.gasReserveSol ? 'Send POOL some SOL by hand: it needs a little to pay for buying more.' : undefined} />
+        <div><div className="label">USDC spent on SOL, 24h</div><div className="num mt-1 text-2xl font-semibold">{money(data.gas.spentTodayUsd)}</div><div className="text-xs text-muted">of {money(form.gas.maxUsdPerDay)} allowed</div></div>
+      </div>}
+      <div className="grid gap-4 sm:grid-cols-5">
+        <Field label="Top up OPS below, SOL"><input className="input num" type="number" step="0.01" value={form.gas.opsMinSol} onChange={e => set('gas', { ...form.gas, opsMinSol: n(e.target.value) })} /></Field>
+        <Field label="Refill OPS to, SOL"><input className="input num" type="number" step="0.01" value={form.gas.opsTargetSol} onChange={e => set('gas', { ...form.gas, opsTargetSol: n(e.target.value) })} /></Field>
+        <Field label="POOL keeps, SOL" hint="Buys more below this"><input className="input num" type="number" step="0.01" value={form.gas.poolMinSol} onChange={e => set('gas', { ...form.gas, poolMinSol: n(e.target.value) })} /></Field>
+        <Field label="Buy SOL with $"><input className="input num" type="number" value={form.gas.buyUsd} onChange={e => set('gas', { ...form.gas, buyUsd: n(e.target.value) })} /></Field>
+        <Field label="Max $ a day" hint="0 = never buy"><input className="input num" type="number" value={form.gas.maxUsdPerDay} onChange={e => set('gas', { ...form.gas, maxUsdPerDay: n(e.target.value) })} /></Field>
+      </div>
+      <button className="btn btn-ghost btn-sm mt-4" onClick={() => act('/admin/gas/run', {}, 'Checked network fee balances.')}>Top up now</button>
+    </Section>
+
     <Section title="Calibration" sub={data.calibration ? `${data.calibration.samples} real Collector Crypt pulls · ${new Date(data.calibration.generatedAt).toLocaleString()}. Fee needed at your pool share, no subsidy.` : undefined}>
       {data.calibration ? <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm">
         <thead><tr className="text-left">{['Pack', 'Pulls', 'Avg value', 'Hit rate', 'Expected loss', ...form.tiers.map(t => `Fee for ${t.name}`)].map(h => <th key={h} className="label pb-2 font-semibold">{h}</th>)}</tr></thead>
@@ -114,6 +131,10 @@ export function AdminPage() {
       Unsaved changes<button className="btn btn-sm bg-white/10 text-white hover:bg-white/20" onClick={() => setForm(data.settings)}>Discard</button><button className="btn btn-red btn-sm" onClick={save}>Save</button>
     </div>}
   </div>;
+}
+
+function GasStat({ label, sol, low, note }: { label: string; sol: number; low: boolean; note?: string }) {
+  return <div><div className="label">{label}</div><div className={`num mt-1 text-2xl font-semibold ${low ? 'text-red' : ''}`}>{sol.toFixed(4)} SOL</div>{note ? <div className="text-xs text-red">{note}</div> : <div className="text-xs text-muted">{low ? 'Low: top-up queued' : 'Healthy'}</div>}</div>;
 }
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: ReactNode }) {

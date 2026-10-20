@@ -72,6 +72,8 @@ test('the daily payout cap queues the rest, and no single rebate exceeds it', as
   const s = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, perWalletDailyUsd: 3, perWalletDailyClaims: 0 } });
   const { wallet, activatedAt } = await user(s, 20_000, 0);
   const pulls = [losingPull(s, wallet), losingPull(s, wallet)];
+  // Big losses, so each rebate hits the $3 cap whatever random values the cards got.
+  for (const p of pulls) { const r = await s.packs.status(p.memo); s.packs.setRecord(p.memo, { ...r, send: { ...r.send, insured_value: 5 } }); }
   for (const p of pulls) await s.claims.claim(wallet, activatedAt, p.memo);
   const claims = await s.claims.list(wallet);
   assert.ok(claims.every(c => c.rebateUsd <= 3), 'each off-site rebate is capped at the daily limit');

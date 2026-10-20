@@ -26,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   burnThresholdUsd: 25,
   feeTransferThresholdUsd: 5,
   gasReserveSol: 0.05,
+  gas: { opsMinSol: 0.1, opsTargetSol: 0.25, poolMinSol: 0.15, buyUsd: 15, maxUsdPerDay: 50 },
   slippageBps: 100,
 };
 

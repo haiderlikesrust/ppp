@@ -131,7 +131,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
     await auth(req, true);
     const calibration = await loadCalibration();
     return {
-      settings: s.settings.current, version: settingsVersion(s.settings.current), blockers: s.practice ? ['Practice mode: in-memory Solana and a mocked Collector Crypt'] : configBlockers(),
+      settings: s.settings.current, version: settingsVersion(s.settings.current), gas: await s.gas.status().catch(() => null), blockers: s.practice ? ['Practice mode: in-memory Solana and a mocked Collector Crypt'] : configBlockers(),
       problems: settingsProblems(s.settings.current, calibration?.distributions ?? []), calibration,
       review: (await db.query("SELECT id,wallet,status,error,updated_at::text FROM orders WHERE status='review' ORDER BY updated_at DESC LIMIT 50")).rows,
       // Includes Collector Crypt purchases that were signed but never finished, so none can hide.
@@ -160,6 +160,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
     return { ok: true };
   });
   app.post('/api/admin/treasury/run', async req => { await auth(req, true); return serial.run(() => s.treasury.run()); });
+  app.post('/api/admin/gas/run', async req => { await auth(req, true); return serial.run(() => s.gas.ensure()); });
 
   // Practice-only helpers. They do not exist when real Solana is wired in.
   if (s.practice && s.solana instanceof MockSolana && s.packs instanceof MockPacks) {
@@ -214,5 +215,5 @@ export async function createApp(options: { services?: Services; timers?: boolean
 
 function publicSettings(s: Services) {
   const c = s.settings.current;
-  return { feeBps: c.feeBps, poolShareBps: c.poolShareBps, tiers: c.tiers, maxRebateUsd: c.maxRebateUsd, offsiteHoldHours: c.offsiteHoldHours, onsiteHoldHours: c.onsiteHoldHours, offsiteActivationHours: c.offsiteActivationHours, offsite: { enabled: c.offsite.enabled, claimWindowDays: c.offsite.claimWindowDays, perWalletDailyClaims: c.offsite.perWalletDailyClaims, perWalletDailyUsd: c.offsite.perWalletDailyUsd, perWalletWeeklyUsd: c.offsite.perWalletWeeklyUsd, dailyPoolBps: c.offsite.dailyPoolBps, targetReserveUsd: c.offsite.targetReserveUsd }, breaker: c.breaker, pausedPrices: c.pausedPrices, paused: c.paused };
+  return { feeBps: c.feeBps, poolShareBps: c.poolShareBps, tiers: c.tiers, maxRebateUsd: c.maxRebateUsd, offsiteHoldHours: c.offsiteHoldHours, onsiteHoldHours: c.onsiteHoldHours, offsiteActivationHours: c.offsiteActivationHours, offsite: { enabled: c.offsite.enabled, claimWindowDays: c.offsite.claimWindowDays, perWalletDailyClaims: c.offsite.perWalletDailyClaims, perWalletDailyUsd: c.offsite.perWalletDailyUsd, perWalletWeeklyUsd: c.offsite.perWalletWeeklyUsd, dailyPoolBps: c.offsite.dailyPoolBps, targetReserveUsd: c.offsite.targetReserveUsd }, breaker: c.breaker, pausedPrices: c.pausedPrices, paused: c.paused, gas: { maxUsdPerDay: c.gas.maxUsdPerDay } };
 }

@@ -36,6 +36,12 @@ export type Settings = {
   burnThresholdUsd: number;
   feeTransferThresholdUsd: number;
   gasReserveSol: number;
+  /**
+   * Keeps both wallets able to pay Solana network fees. When OPS drops below `opsMinSol`, POOL sends it
+   * SOL up to `opsTargetSol`. When POOL itself drops below `poolMinSol`, it buys SOL with `buyUsd` of its
+   * USDC, at most `maxUsdPerDay` a day (0 = never buy).
+   */
+  gas: { opsMinSol: number; opsTargetSol: number; poolMinSol: number; buyUsd: number; maxUsdPerDay: number };
   slippageBps: number;
 };
 
@@ -67,7 +73,7 @@ export type PoolView = {
   live: boolean; poolAddress: string | null; opsAddress: string | null;
   balanceUsd: number; reservedUsd: number; freeUsd: number; queuedUsd: number; healthBps: number;
   pendingFeeTransferUsd: number; burnBucketUsd: number;
-  totals: { creatorFeesUsd: number; feeShareUsd: number; onsiteRebatesUsd: number; offsiteRebatesUsd: number; burnedUsd: number; packsOpened: number; claimsPaid: number };
+  totals: { creatorFeesUsd: number; feeShareUsd: number; onsiteRebatesUsd: number; offsiteRebatesUsd: number; networkFeesUsd: number; burnedUsd: number; packsOpened: number; claimsPaid: number };
   byPrice: { priceUsd: number; packs: number; feesToPoolUsd: number; rebatesUsd: number; lossRatioBps: number | null; paused: boolean }[];
   recentBurns: { id: string; usdcUsd: number; tokens: string; signature: string | null; createdAt: number }[];
 };

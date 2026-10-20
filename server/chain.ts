@@ -77,7 +77,10 @@ export class Chain {
     if (solDelta < -(maxNative + 20_000_000n) || BigInt(after[0]?.lamports ?? 0) < BigInt(Math.round(settings.gasReserveSol * 1e9))) throw new ReviewRequired('Transaction exceeds gas allowance or wallet reserve.');
     for (const [mint, delta] of deltas) if (delta < 0n && (mint !== policy.inputMint || -delta > (policy.maxInput ?? 0n))) throw new ReviewRequired('Unexpected wallet token debit.');
     if (policy.inputMint && policy.inputMint !== NATIVE_MINT.toBase58() && -(deltas.get(policy.inputMint) ?? 0n) < (policy.minInput ?? 0n)) throw new ReviewRequired('Swap input does not match.');
-    if (policy.outputMint && (deltas.get(policy.outputMint) ?? 0n) < (policy.minOutput ?? 0n)) throw new ReviewRequired('Swap output is below the minimum.');
+    if (policy.outputMint === NATIVE_MINT.toBase58()) {
+      // Native SOL lands in the wallet itself (or a wSOL account), net of this transaction's fees: allow 0.002 SOL for them.
+      if (solDelta + (deltas.get(policy.outputMint) ?? 0n) + 2_000_000n < (policy.minOutput ?? 0n)) throw new ReviewRequired('Swap output is below the minimum.');
+    } else if (policy.outputMint && (deltas.get(policy.outputMint) ?? 0n) < (policy.minOutput ?? 0n)) throw new ReviewRequired('Swap output is below the minimum.');
   }
 
   async execute(id: string, kind: string, build: () => Promise<VersionedTransaction>, settings: Settings, policy: TxPolicy = { kind: 'internal' }) {
@@ -147,6 +150,16 @@ export class Chain {
         createAssociatedTokenAccountIdempotentInstruction(signer.publicKey, destination, recipient, mint),
         createTransferCheckedInstruction(source, mint, destination, signer.publicKey, amount, 6),
       ]);
+    }, settings);
+  }
+
+  /** Idempotent native SOL transfer (network-fee top-ups between our own wallets). */
+  async sendSol(id: string, to: string, lamports: bigint, settings: Settings) {
+    if (lamports <= 0n) throw new Error('Transfer amount must be positive.');
+    return this.execute(id, 'sol-transfer', async () => {
+      const { signer } = this.require();
+      if (await this.balance(NATIVE_MINT.toBase58()) < lamports + BigInt(Math.round(settings.gasReserveSol * 1e9))) throw new PendingOperation(`The ${this.label} wallet is waiting for SOL to cover this transfer.`);
+      return this.build([ComputeBudgetProgram.setComputeUnitLimit({ units: 5_000 }), SystemProgram.transfer({ fromPubkey: signer.publicKey, toPubkey: new PublicKey(to), lamports })]);
     }, settings);
   }
 

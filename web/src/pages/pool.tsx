@@ -17,7 +17,7 @@ export function PoolPage() {
   if (!pool) return <div className="py-20 text-center text-muted">{failed ? <>The pool could not be loaded. <button className="font-semibold text-ink underline" onClick={() => location.reload()}>Try again</button></> : "Loading the pool…"}</div>;
   const t = pool.totals, total = Math.max(pool.balanceUsd, 0.01);
   const inflow = [['Creator fees', t.creatorFeesUsd, 'bg-yellow'], ['Pack protection fees', t.feeShareUsd, 'bg-blue']] as const;
-  const outflow = [['Rebates on our packs', t.onsiteRebatesUsd, 'bg-grass'], ['Off-site claims', t.offsiteRebatesUsd, 'bg-grass/60']] as const;
+  const outflow = [['Rebates on our packs', t.onsiteRebatesUsd, 'bg-grass'], ['Off-site claims', t.offsiteRebatesUsd, 'bg-grass/60'], ...(t.networkFeesUsd > 0 ? [['Solana network fees', t.networkFeesUsd, 'bg-faint'] as const] : [])] as const;
   const flowMax = Math.max(0.01, ...inflow.map(x => x[1]), ...outflow.map(x => x[1]));
 
   return <>

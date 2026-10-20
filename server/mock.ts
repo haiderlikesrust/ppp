@@ -79,6 +79,27 @@ export class MockSolana implements Solana {
     return { tokens: BigInt(usdcMicros) * 4_000n, swapSignature: signature, burnSignature: signature };
   }
   async collectCreatorFees() { return null; }
+
+  /** Lamports per wallet. Both start with 1 SOL. */
+  readonly sol = new Map<'ops' | 'pool', bigint>([['ops', 1_000_000_000n], ['pool', 1_000_000_000n]]);
+  /** Practice SOL price, used when the pool buys SOL for fees. */
+  solPriceUsd = 150;
+  private gasDone = new Map<string, { lamports: bigint; signature: string }>();
+  async solBalance(wallet: 'ops' | 'pool') { return this.sol.get(wallet) ?? 0n; }
+  async sendGas(jobId: string, lamports: bigint) {
+    const existing = this.gasDone.get(jobId); if (existing) return existing.signature;
+    const pool = this.sol.get('pool') ?? 0n;
+    if (pool < lamports) throw new PendingOperation('The POOL wallet is waiting for SOL to cover this transfer.');
+    this.sol.set('pool', pool - lamports); this.sol.set('ops', (this.sol.get('ops') ?? 0n) + lamports);
+    const result = { lamports, signature: fakeSignature() }; this.gasDone.set(jobId, result); return result.signature;
+  }
+  async buyGas(jobId: string, usdcMicros: number) {
+    const existing = this.gasDone.get(jobId); if (existing) return existing;
+    this.move(this.poolAddress, fakeAddress(), BigInt(usdcMicros));
+    const lamports = BigInt(Math.floor(usdcMicros * 1_000 / this.solPriceUsd));
+    this.sol.set('pool', (this.sol.get('pool') ?? 0n) + lamports);
+    const result = { lamports, signature: fakeSignature() }; this.gasDone.set(jobId, result); return result;
+  }
   /** Practice helper: pretend creator fees arrived in the pool. */
   fundPool(micros: number) { this.move(null, this.poolAddress, BigInt(micros)); }
 }

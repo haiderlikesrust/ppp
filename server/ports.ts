@@ -43,4 +43,10 @@ export interface Solana {
   buybackAndBurn(jobId: string, usdcMicros: number, settings: Settings): Promise<{ tokens: bigint; swapSignature: string; burnSignature: string }>;
   /** POOL: claims pump.fun creator fees and converts them to USDC. */
   collectCreatorFees(settings: Settings): Promise<{ id: string; usdcMicros: number; signature: string } | null>;
+  /** Native SOL balance in lamports. */
+  solBalance(wallet: 'ops' | 'pool'): Promise<bigint>;
+  /** POOL sends OPS SOL for network fees. Idempotent per job id. */
+  sendGas(jobId: string, lamports: bigint, settings: Settings): Promise<string>;
+  /** POOL swaps some of its USDC into SOL for network fees. Idempotent per job id. */
+  buyGas(jobId: string, usdcMicros: number, settings: Settings): Promise<{ lamports: bigint; signature: string }>;
 }

@@ -1,5 +1,5 @@
 import { PublicKey, type Connection } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { NATIVE_MINT, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import bs58 from 'bs58';
 import { config } from './config';
 import type { Chain } from './chain';
@@ -123,4 +123,16 @@ export class LiveSolana implements Solana {
   }
 
   collectCreatorFees(settings: Settings) { return collectCreatorFees(this.pool, settings); }
+
+  solBalance(wallet: 'ops' | 'pool') { return (wallet === 'ops' ? this.ops : this.pool).balance(NATIVE_MINT.toBase58()); }
+
+  sendGas(jobId: string, lamports: bigint, settings: Settings) {
+    if (!this.opsAddress) throw new Error('The OPS wallet is not configured.');
+    return this.pool.sendSol(jobId, this.opsAddress, lamports, settings);
+  }
+
+  async buyGas(jobId: string, usdcMicros: number, settings: Settings) {
+    const bought = await swap(this.pool, jobId, config.USDC_MINT, NATIVE_MINT.toBase58(), BigInt(usdcMicros), settings);
+    return { lamports: bought.received, signature: bought.signature };
+  }
 }

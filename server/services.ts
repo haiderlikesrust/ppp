@@ -15,6 +15,7 @@ import { Pool } from './pool';
 import { Orders } from './orders';
 import { Claims } from './claims';
 import { Treasury } from './treasury';
+import { Gas } from './gas';
 import type { PackProvider, Solana } from './ports';
 
 export type Services = Awaited<ReturnType<typeof createServices>>;
@@ -49,10 +50,11 @@ export async function createServices(options: { db?: Database; solana?: Solana; 
     packs = options.packs ?? new CollectorCryptPacks(new CollectorCrypt(config.COLLECTOR_CRYPT_API_KEY), { connection: rpc, signer: ops.signer, paymentWallet: config.COLLECTOR_CRYPT_PAYMENT_WALLET, store: new JobPurchaseStore(jobs), enabled: config.live, dasRpcUrl: config.dasRpcUrl });
   }
   const holders = new Holders(db, solana, settings), pool = new Pool(db, solana, settings);
-  const orders = new Orders(db, jobs, solana, packs, holders, pool, settings);
+  const gas = new Gas(db, jobs, solana, pool, settings);
+  const orders = new Orders(db, jobs, solana, packs, holders, pool, settings, gas);
   const claims = new Claims(db, solana, packs, holders, pool, settings);
   const treasury = new Treasury(db, jobs, solana, pool, settings);
-  return { db, jobs, settings, solana, packs, holders, pool, orders, claims, treasury, serial: new Serial(), practice: solana instanceof MockSolana };
+  return { db, jobs, settings, solana, packs, holders, pool, gas, orders, claims, treasury, serial: new Serial(), practice: solana instanceof MockSolana };
 }
 
 /** Background loops. Every financial step runs through the one Serial queue. */
@@ -70,6 +72,8 @@ export function startCoordinator(s: Services, log: (message: string, error?: unk
   // One RPC call per active wallet and no money: kept out of the queue so a long sweep never delays payments.
   every(15 * 60_000, 'snapshots', async () => { await s.holders.snapshotAll(); await s.holders.prune(); }, false);
   every(5 * 60_000, 'treasury', () => s.treasury.run());
+  // One balance check per wallet; a top-up only when OPS runs low.
+  every(30_000, 'gas', () => s.gas.ensure());
   every(5 * 60_000, 'cleanup', async () => { await s.db.query('DELETE FROM sessions WHERE expires_at<$1', [Date.now()]); await s.db.query('DELETE FROM challenges WHERE expires_at<$1', [Date.now()]); });
   return () => timers.forEach(clearInterval);
 }

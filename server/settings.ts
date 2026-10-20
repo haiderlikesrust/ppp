@@ -21,7 +21,13 @@ export const settingsSchema: z.ZodType<Settings> = z.object({
   burnThresholdUsd: z.number().finite().min(1).max(1_000_000),
   feeTransferThresholdUsd: z.number().finite().min(1).max(1_000_000),
   gasReserveSol: z.number().finite().min(0.01).max(100),
+  gas: z.object({ opsMinSol: z.number().finite().min(0.02).max(100), opsTargetSol: z.number().finite().min(0.02).max(100), poolMinSol: z.number().finite().min(0.02).max(100), buyUsd: z.number().finite().min(1).max(1_000), maxUsdPerDay: z.number().finite().min(0).max(10_000) }),
   slippageBps: z.number().int().min(1).max(100),
+}).superRefine((s, ctx) => {
+  // OPS swaps (buyback) and POOL swaps (creator fees, gas) must leave each wallet above the reserve.
+  if (s.gas.opsTargetSol <= s.gas.opsMinSol) ctx.addIssue({ code: 'custom', path: ['gas', 'opsTargetSol'], message: 'OPS refill level must be above its top-up trigger.' });
+  if (s.gas.opsMinSol < s.gasReserveSol) ctx.addIssue({ code: 'custom', path: ['gas', 'opsMinSol'], message: 'OPS top-up trigger must be at least the gas reserve.' });
+  if (s.gas.poolMinSol < s.gasReserveSol) ctx.addIssue({ code: 'custom', path: ['gas', 'poolMinSol'], message: 'POOL minimum must be at least the gas reserve.' });
 });
 
 export class SettingsStore {
@@ -30,7 +36,7 @@ export class SettingsStore {
   async load() {
     const row = (await this.db.query('SELECT data FROM settings WHERE id=1')).rows[0];
     // New fields added in later versions fall back to their defaults.
-    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker } }) : DEFAULT_SETTINGS;
+    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker }, gas: { ...DEFAULT_SETTINGS.gas, ...row.data.gas } }) : DEFAULT_SETTINGS;
     return this.current;
   }
   async save(settings: Settings) {

@@ -105,7 +105,7 @@ export class Pool {
       pendingFeeTransferUsd: usd(feeShare - transferred), burnBucketUsd: usd(await total("bucket='burn'")),
       totals: {
         creatorFeesUsd: usd(await total("bucket='pool' AND kind='creator-fee'")), feeShareUsd: usd(feeShare),
-        onsiteRebatesUsd: usd(Math.abs(await total("bucket='pool' AND kind='rebate'"))), offsiteRebatesUsd: usd(Math.abs(await total("bucket='pool' AND kind='claim'"))),
+        onsiteRebatesUsd: usd(Math.abs(await total("bucket='pool' AND kind='rebate'"))), offsiteRebatesUsd: usd(Math.abs(await total("bucket='pool' AND kind='claim'"))), networkFeesUsd: usd(Math.abs(await total("bucket='pool' AND kind='gas'"))),
         burnedUsd: usd(Math.abs(await total("bucket='burn' AND kind='burn'"))),
         packsOpened: prices.reduce((s, p) => s + p.packs, 0),
         claimsPaid: Number((await this.db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM claims WHERE status='paid'")).rows[0].n),

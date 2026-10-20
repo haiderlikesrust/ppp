@@ -143,6 +143,7 @@ export function DocsPage() {
           <li><b>Off-site limits.</b> Per-wallet weekly and pool-wide daily caps. Off-site coverage also shrinks when the pool drops below its {money(s.offsite.targetReserveUsd)} reserve target.</li>
           <li><b>Automatic brake.</b> If rebates for a pack price run above {pct(s.breaker.lossRatioBps)} of the fees that price brings in, protection for that price pauses.</li>
           <li><b>Lowest-balance tiers</b> stop people buying in just for one pull.</li>
+          <li><b>Network fees.</b> Solana charges a tiny fee for every transaction. When our operations wallet runs low, the pool sends it SOL, and when the pool runs low it buys SOL with {s.gas ? <>at most {money(s.gas.maxUsdPerDay)}</> : 'a small, capped amount'} of USDC a day. It shows on the <Link href="/pool">Pool page</Link> as network fees.</li>
         </ul>
       </Section>
 
