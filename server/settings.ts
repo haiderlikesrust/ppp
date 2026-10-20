@@ -14,7 +14,7 @@ export const settingsSchema: z.ZodType<Settings> = z.object({
   onsiteHoldHours: z.number().finite().min(0).max(24 * 30),
   offsiteHoldHours: z.number().finite().min(0).max(24 * 30),
   offsiteActivationHours: z.number().finite().min(0).max(24 * 30),
-  offsite: z.object({ enabled: z.boolean(), claimWindowDays: z.number().int().min(1).max(30), perWalletDailyClaims: z.number().int().min(0).max(1_000), perWalletDailyUsd: z.number().finite().min(0).max(100_000), perWalletWeeklyUsd: z.number().finite().min(0).max(100_000), dailyPoolBps: bps, targetReserveUsd: z.number().finite().min(0).max(10_000_000) }),
+  offsite: z.object({ enabled: z.boolean(), claimWindowHours: z.number().int().min(1).max(24 * 30), perWalletDailyClaims: z.number().int().min(0).max(1_000), perWalletDailyUsd: z.number().finite().min(0).max(100_000), perWalletWeeklyUsd: z.number().finite().min(0).max(100_000), dailyPoolBps: bps, targetReserveUsd: z.number().finite().min(0).max(10_000_000) }),
   breaker: z.object({ lossRatioBps: z.number().int().min(0).max(1_000_000), minPacks: z.number().int().min(1).max(10_000), windowDays: z.number().int().min(1).max(90) }),
   pausedPrices: z.array(z.number().int().positive()).max(32),
   creatorFeeBudgetUsdPerDay: z.number().finite().min(0).max(10_000_000),

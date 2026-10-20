@@ -17,7 +17,9 @@ export type Settings = {
   /** Hours after a wallet first connects before its off-site pulls are covered. 0 = covered right away. */
   offsiteActivationHours: number;
   offsite: {
-    enabled: boolean; claimWindowDays: number;
+    enabled: boolean;
+    /** How far back a pull may be claimed, in hours. Packs opened on our site need no claim: they are paid automatically. */
+    claimWindowHours: number;
     /** Claims a wallet may file per rolling 24h. 0 = no limit. */
     perWalletDailyClaims: number;
     /** USDC a wallet can be paid per rolling 24h; extra approved claims wait in the queue. 0 = no limit. */

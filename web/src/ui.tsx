@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { Card } from '../../shared/types';
 import { money } from './api';
@@ -37,7 +37,70 @@ export function PackArt({ priceUsd, className = '' }: { priceUsd: number; classN
 }
 
 const TYPE_COLORS = ['#e3350d', '#2a75bb', '#ffcb05', '#2f9e4f', '#7b3fe4', '#f95587', '#ee8130', '#6390f0'];
-const typeColor = (name: string) => TYPE_COLORS[[...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TYPE_COLORS.length];
+const hash = (text: string) => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+const typeColor = (name: string) => TYPE_COLORS[hash(name) % TYPE_COLORS.length];
+/** Mixes a hex color toward white (t > 0) or black (t < 0). */
+function shade(hex: string, t: number) {
+  const n = parseInt(hex.slice(1), 16), target = t > 0 ? 255 : 0, k = Math.abs(t);
+  return `rgb(${[n >> 16, (n >> 8) & 255, n & 255].map(v => Math.round(v + (target - v) * k)).join(',')})`;
+}
+/** Deterministic numbers from a seed, so a card always draws the same way. */
+function seeded(seed: number) {
+  let s = seed || 1;
+  return (n: number) => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return Math.floor(s / 4294967296 * n); };
+}
+const ATTACKS = ['Sparkle Burst', 'Moon Tackle', 'Ribbon Lash', 'Quick Strike', 'Static Pulse', 'Leaf Dance', 'Ember Rush', 'Tidal Spin', 'Shadow Step', 'Star Fall'];
+const star = (x: number, y: number, r: number) => `M${x} ${y - r}L${x + r * .28} ${y - r * .28}L${x + r} ${y}L${x + r * .28} ${y + r * .28}L${x} ${y + r}L${x - r * .28} ${y + r * .28}L${x - r} ${y}L${x - r * .28} ${y - r * .28}Z`;
+
+/**
+ * An original trading-card illustration for cards without a photo (practice mode, examples).
+ * Deliberately not official artwork; real pulls show Collector Crypt's photo of the card.
+ */
+export function CardArt({ name, set, color }: { name: string; set?: string; color: string }) {
+  const id = useId().replace(/:/g, ''), rand = seeded(hash(`${name}|${set ?? ''}`));
+  const hp = 60 + rand(15) * 10, number = 1 + rand(250);
+  const first = rand(ATTACKS.length), second = (first + 1 + rand(ATTACKS.length - 1)) % ATTACKS.length;
+  const damage = [10 + rand(5) * 10, 0]; damage[1] = damage[0] + 30 + rand(8) * 10;
+  const sparkles = Array.from({ length: 7 }, () => ({ x: 32 + rand(186), y: 58 + rand(96), r: 3 + rand(4) }));
+  const title = name.length > 13 ? `${name.slice(0, 12)}…` : name, ink = '#17171c';
+  const attack = (y: number, dots: number, label: string, dmg: number) => <g>
+    {Array.from({ length: dots }, (_, i) => <circle key={i} cx={30 + i * 15} cy={y - 5} r="6.5" fill={color} stroke="#fff" strokeWidth="1.5" />)}
+    <text x={30 + dots * 15} y={y} fontSize="13" fontWeight="700" fill={ink}>{label}</text>
+    <text x="224" y={y + 1} textAnchor="end" fontSize="17" fontWeight="700" fill={ink}>{dmg}</text>
+    <rect x="26" y={y + 9} width="176" height="4" rx="2" fill={ink} opacity=".16" /><rect x="26" y={y + 17} width="118" height="4" rx="2" fill={ink} opacity=".16" />
+  </g>;
+  return <svg viewBox="0 0 250 350" className="block aspect-[5/7] w-full" role="img" aria-label={`${name} card illustration`}>
+    <defs>
+      <linearGradient id={`${id}f`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fae58a" /><stop offset=".5" stopColor="#e2b42a" /><stop offset="1" stopColor="#f7da6a" /></linearGradient>
+      <linearGradient id={`${id}b`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={shade(color, .62)} /><stop offset="1" stopColor={shade(color, .3)} /></linearGradient>
+      <radialGradient id={`${id}a`} cx=".5" cy=".45" r=".8"><stop offset="0" stopColor={shade(color, .85)} /><stop offset=".5" stopColor={shade(color, .15)} /><stop offset="1" stopColor={shade(color, -.4)} /></radialGradient>
+      <linearGradient id={`${id}h`} x1="0" y1="0" x2="1" y2=".6"><stop offset=".35" stopColor="#fff" stopOpacity="0" /><stop offset=".5" stopColor="#fff" stopOpacity=".6" /><stop offset=".65" stopColor="#fff" stopOpacity="0" /></linearGradient>
+      <clipPath id={`${id}c`}><rect x="20" y="47" width="210" height="140" /></clipPath>
+    </defs>
+    <rect width="250" height="350" rx="14" fill={`url(#${id}f)`} />
+    <rect x="9" y="9" width="232" height="332" rx="8" fill={`url(#${id}b)`} />
+    <text x="20" y="36" fontSize="18" fontWeight="700" fill={ink}>{title}</text>
+    <text x="211" y="36" textAnchor="end" fontWeight="700" fill={ink}><tspan fontSize="9">HP </tspan><tspan fontSize="18">{hp}</tspan></text>
+    <circle cx="224" cy="30" r="8.5" fill={color} stroke="#fff" strokeWidth="2" />
+    <g clipPath={`url(#${id}c)`}>
+      <rect x="20" y="47" width="210" height="140" fill={`url(#${id}a)`} />
+      {Array.from({ length: 12 }, (_, i) => <rect key={i} x="124" y="0" width="2.5" height="230" fill="#fff" opacity=".13" transform={`rotate(${i * 15} 125 110)`} />)}
+      <circle cx="125" cy="108" r="44" fill="#fff" opacity=".22" /><circle cx="125" cy="108" r="26" fill="#fff" opacity=".42" />
+      <path d="M20 187C58 150 98 172 138 160S206 148 230 164V187Z" fill={shade(color, -.3)} opacity=".6" />
+      <path d="M20 187C70 168 118 184 168 172S218 170 230 178V187Z" fill={shade(color, -.55)} opacity=".7" />
+      {sparkles.map((p, i) => <path key={i} d={star(p.x, p.y, p.r)} fill="#fff" opacity=".9" />)}
+      <rect className="card-holo" x="20" y="47" width="210" height="140" fill={`url(#${id}h)`} />
+    </g>
+    <rect x="20" y="47" width="210" height="140" fill="none" stroke="#c99f2e" strokeWidth="3" />
+    <rect x="36" y="193" width="178" height="14" rx="7" fill="#f3d669" />
+    <text x="125" y="203.5" textAnchor="middle" fontSize="8.5" fontStyle="italic" fill={ink}>{set ?? 'Collector'} · No. {number}</text>
+    {attack(232, 1, ATTACKS[first], damage[0])}
+    <line x1="24" x2="226" y1="266" y2="266" stroke={ink} strokeOpacity=".15" />
+    {attack(288, 2, ATTACKS[second], damage[1])}
+    <rect x="26" y="322" width="34" height="4" rx="2" fill={ink} opacity=".2" /><rect x="72" y="322" width="34" height="4" rx="2" fill={ink} opacity=".2" /><rect x="118" y="322" width="22" height="4" rx="2" fill={ink} opacity=".2" />
+    <path d={star(222, 324, 6)} fill={ink} />
+  </svg>;
+}
 
 /** A graded slab: red certification label, card window, value underneath. */
 export function Slab({ card, priceUsd, size = 'md' }: { card: Pick<Card, 'name' | 'image' | 'insuredValueUsd' | 'rarity'>; priceUsd?: number; size?: 'sm' | 'md' }) {
@@ -54,10 +117,9 @@ export function Slab({ card, priceUsd, size = 'md' }: { card: Pick<Card, 'name' 
     </div>
     <div className="mt-1.5 overflow-hidden rounded-lg border border-line">
       {card.image ? <img src={card.image} alt={card.name} referrerPolicy="no-referrer" className="aspect-[5/7] w-full object-cover" />
-        : <div className="@container relative grid aspect-[5/7] place-items-center" style={{ background: `${color}1f` }}>
-          {/* Sized to the slab so narrow slabs (the hero example on phones) never overflow. */}
-          <div className={`grid aspect-square place-items-center rounded-full font-bold text-white ${small ? 'size-8 text-base' : 'w-[62cqw] max-w-20 text-[min(2.25rem,28cqw)]'}`} style={{ background: color }}>{name?.[0]}</div>
-          {hit && <div className="absolute right-1.5 top-1.5 rounded-full bg-yellow px-1.5 text-[9px] font-bold">HIT</div>}
+        : <div className="relative">
+          <CardArt name={name ?? card.name} set={set} color={color} />
+          {hit && <div className="absolute bottom-1.5 right-1.5 rounded-full bg-yellow px-1.5 text-[9px] font-bold">HIT</div>}
         </div>}
     </div>
     {!small && <div className="num mt-1.5 text-center text-sm font-semibold">{money(card.insuredValueUsd)}</div>}

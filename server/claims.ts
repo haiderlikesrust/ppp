@@ -6,10 +6,10 @@ import type { Pool } from './pool';
 import type { Runner } from './orders';
 import type { SettingsStore } from './settings';
 import { ccRecordProblem } from './cc/history';
-import { micros, offsiteCoverageBps, offsiteRebateCapMicros, rebateMicros, usd } from '../shared/protection';
+import { micros, offsiteCoverageBps, offsiteRebateCapMicros, rebateMicros, usd, windowLabel } from '../shared/protection';
 import type { ClaimCandidate } from '../shared/types';
 
-const DAY = 86_400_000;
+const HOUR = 3_600_000;
 const until = (at: number | null) => {
   const minutes = Math.max(1, Math.ceil(((at ?? Date.now()) - Date.now()) / 60_000));
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
@@ -35,7 +35,7 @@ export class Claims {
     return value;
   }
 
-  private windowStart() { return Date.now() - this.settings.current.offsite.claimWindowDays * DAY; }
+  private windowStart() { return Date.now() - this.settings.current.offsite.claimWindowHours * HOUR; }
 
   private paymentCache = new Map<string, { at: number; value: Promise<CcPayment[]> }>();
 
@@ -71,7 +71,7 @@ export class Claims {
     const existing = (await this.db.query<ClaimRow>('SELECT * FROM claims WHERE memo=$1', [p.memo])).rows[0];
     if (existing) return { ...base, valueUsd: existing.wallet === wallet ? usd(Number(existing.value_micros)) : null, reason: existing.wallet === wallet ? 'Already claimed.' : 'Claimed by another wallet.', claim: existing.wallet === wallet ? { status: existing.status, rebateUsd: usd(Number(existing.rebate_micros)), signature: existing.signature } : null };
     if ((await this.db.query('SELECT 1 FROM pulls WHERE memo=$1', [p.memo])).rows.length) return no('Opened on our site; its protection was settled automatically.');
-    if (p.blockTime < this.windowStart()) return no(`Older than the ${s.offsite.claimWindowDays}-day claim window.`);
+    if (p.blockTime < this.windowStart()) return no(`Older than the claim window (pulls from the last ${windowLabel(s.offsite.claimWindowHours)}).`);
     let status;
     try { status = await this.ccStatus(p.memo); } catch { return no('Collector Crypt could not be reached. Try again shortly.'); }
     const problem = ccRecordProblem(status, wallet, p);

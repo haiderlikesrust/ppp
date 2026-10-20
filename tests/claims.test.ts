@@ -97,7 +97,7 @@ test('a pack whose record belongs to another wallet cannot be claimed', async ()
 });
 
 test('refunded packs, winning pulls and old pulls are rejected', async () => {
-  const s = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, claimWindowDays: 2 } });
+  const s = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, claimWindowHours: 48 } });
   const { wallet, activatedAt } = await user(s, 10_000, 24 * 10);
   const refunded = losingPull(s, wallet);
   const record = await s.packs.status(refunded.memo);
@@ -149,4 +149,13 @@ test('there is no pool-wide daily cap by default; if the owner sets one, claims 
   const [claim] = await capped.claims.list(b.wallet);
   assert.equal(claim.status, claim.rebateUsd <= 1 ? 'paid' : 'queued');
   await capped.db.close();
+});
+
+test('off-site pulls can be claimed for 24 hours by default', async () => {
+  const s = await setup(), { wallet, activatedAt } = await user(s, 10_000, 48);
+  const fresh = losingPull(s, wallet, 23), stale = losingPull(s, wallet, 25);
+  const candidates = await s.claims.scan(wallet, activatedAt);
+  assert.ok(candidates.some(c => c.memo === fresh.memo && c.eligible), 'a pull from 23 hours ago is claimable');
+  assert.ok(!candidates.some(c => c.memo === stale.memo), 'a pull from 25 hours ago is outside the window');
+  await s.db.close();
 });

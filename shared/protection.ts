@@ -19,7 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
   onsiteHoldHours: 0,
   offsiteHoldHours: 24,
   offsiteActivationHours: 0,
-  offsite: { enabled: true, claimWindowDays: 7, perWalletDailyClaims: 3, perWalletDailyUsd: 25, perWalletWeeklyUsd: 100, dailyPoolBps: 0, targetReserveUsd: 1_000 },
+  offsite: { enabled: true, claimWindowHours: 24, perWalletDailyClaims: 3, perWalletDailyUsd: 25, perWalletWeeklyUsd: 100, dailyPoolBps: 0, targetReserveUsd: 1_000 },
   breaker: { lossRatioBps: 20_000, minPacks: 20, windowDays: 7 },
   pausedPrices: [],
   creatorFeeBudgetUsdPerDay: 0,
@@ -29,6 +29,9 @@ export const DEFAULT_SETTINGS: Settings = {
   gas: { opsMinSol: 0.1, opsTargetSol: 0.25, poolMinSol: 0.15, buyUsd: 15, maxUsdPerDay: 50 },
   slippageBps: 100,
 };
+
+/** "24 hours", "2 days": how a claim window is written on the site. */
+export const windowLabel = (hours: number) => hours > 24 && hours % 24 === 0 ? `${hours / 24} days` : `${hours} hour${hours === 1 ? '' : 's'}`;
 
 /** Highest tier whose minimum share of supply the balance meets. */
 export function holderTier(balance: bigint, supply: bigint, tiers: HolderTier[]): HolderTier | null {

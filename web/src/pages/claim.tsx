@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowUpRight, CalendarClock, Clock, Loader2, ScanSearch, Wallet } from 'lucide-react';
 import type { ClaimCandidate } from '../../../shared/types';
 import { ago, api, money, pct, solscan } from '../api';
+import { windowLabel } from '../../../shared/protection';
 import { useApp } from '../app';
 import { CoverageLadder } from '../parts/holder';
 import { Empty, SectionTitle, packStyle } from '../ui';
@@ -68,7 +69,7 @@ export function ClaimPage() {
       </div>
       <div className="card grid gap-5 p-6 sm:p-8">
         <div className="label">The rules</div>
-        {[[CalendarClock, `Pulls from the last ${o?.claimWindowDays ?? 7} days`, 'Paid for and delivered to this same wallet.'],
+        {[[CalendarClock, `Pulls from the last ${windowLabel(o?.claimWindowHours ?? 24)}`, 'Paid for and delivered to this same wallet. Packs opened on our site are paid back automatically.'],
           activation > 0 ? [Clock, `Starts ${activation}h after you connect`, 'Your balance has to stay in tier through the pull.'] : [Clock, 'Covered right away', 'No waiting period. Hold a tier balance and claim the same day you connect.'],
           [Wallet, dailyLimit, `${(o?.perWalletWeeklyUsd ?? 0) > 0 ? `At most ${money(o.perWalletWeeklyUsd)} a week. ` : ''}Each pack can be claimed once, and off-site pays less than packs opened here.`]].map(([Icon, title, text], i) => {
           const I = Icon as typeof Clock;
@@ -78,7 +79,7 @@ export function ClaimPage() {
     </section>
 
     {candidates && <section className="pb-14">
-      <SectionTitle title={eligible.length ? `${eligible.length} pull${eligible.length > 1 ? 's' : ''} you can claim` : 'Pulls found in your wallet'} sub={candidates.length ? `${candidates.length} Collector Crypt pack${candidates.length > 1 ? 's' : ''} in the last ${o?.claimWindowDays ?? 7} days.` : undefined} />
+      <SectionTitle title={eligible.length ? `${eligible.length} pull${eligible.length > 1 ? 's' : ''} you can claim` : 'Pulls found in your wallet'} sub={candidates.length ? `${candidates.length} Collector Crypt pack${candidates.length > 1 ? 's' : ''} in the last ${windowLabel(o?.claimWindowHours ?? 24)}.` : undefined} />
       {candidates.length ? <div className="grid gap-3">
         {[...eligible, ...other].map(c => <ClaimRow key={c.memo} c={c} busy={busy === c.memo} onClaim={() => claim(c)} />)}
       </div> : <Empty title="No pack payments found" text="This wallet has no Collector Crypt pack purchases in the claim window. Packs bought from another wallet have to be claimed from that wallet." />}

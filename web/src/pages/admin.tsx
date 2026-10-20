@@ -68,7 +68,7 @@ export function AdminPage() {
     <Section title="Off-site claims and limits">
       <div className="grid gap-4 sm:grid-cols-4">
         <Field label="Claims"><Toggle checked={form.offsite.enabled} onChange={v => set('offsite', { ...form.offsite, enabled: v })} label="Enabled" /></Field>
-        <Field label="Claim window, days"><input className="input num" type="number" value={form.offsite.claimWindowDays} onChange={e => set('offsite', { ...form.offsite, claimWindowDays: n(e.target.value) })} /></Field>
+        <Field label="Claim window, hours" hint="24 = pulls from the last day"><input className="input num" type="number" value={form.offsite.claimWindowHours} onChange={e => set('offsite', { ...form.offsite, claimWindowHours: n(e.target.value) })} /></Field>
         <Field label="Claims / wallet / day" hint="0 = no limit"><input className="input num" type="number" value={form.offsite.perWalletDailyClaims} onChange={e => set('offsite', { ...form.offsite, perWalletDailyClaims: n(e.target.value) })} /></Field>
         <Field label="Paid / wallet / day $" hint="0 = no limit"><input className="input num" type="number" value={form.offsite.perWalletDailyUsd} onChange={e => set('offsite', { ...form.offsite, perWalletDailyUsd: n(e.target.value) })} /></Field>
         <Field label="Paid / wallet / week $" hint="0 = no limit"><input className="input num" type="number" value={form.offsite.perWalletWeeklyUsd} onChange={e => set('offsite', { ...form.offsite, perWalletWeeklyUsd: n(e.target.value) })} /></Field>

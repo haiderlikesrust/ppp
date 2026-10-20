@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowRight, ArrowUpRight, Flame } from 'lucide-react';
 import type { HolderTier } from '../../../shared/types';
+import { windowLabel } from '../../../shared/protection';
 import { money, pct, short, solscan } from '../api';
 import { Link, useApp } from '../app';
 import { Logo, PackArt, RebateBar } from '../ui';
@@ -106,7 +107,7 @@ export function DocsPage() {
         <p>Opened a pack directly on Collector Crypt? Connect the same wallet on the <Link href="/claim" className="font-semibold text-blue underline underline-offset-2">Claim page</Link> and scan. We find your pack payment on-chain, then check Collector Crypt's record of the card it sent you. A pull qualifies when:</p>
         <ul>
           <li>your wallet paid for the pack, and the card was delivered to that same wallet;</li>
-          <li>it was opened in the last <b>{s.offsite.claimWindowDays} days</b>{s.offsiteActivationHours > 0 ? ', after your coverage started' : ''};</li>
+          <li>it was opened in the last <b>{windowLabel(s.offsite.claimWindowHours ?? 24)}</b>{s.offsiteActivationHours > 0 ? ', after your coverage started' : ''};</li>
           <li>you hold a tier balance (see above);</li>
           <li>the pack was not refunded or instantly sold back (turbo mode);</li>
           <li>it has not been claimed before. Each pack can be claimed once.</li>
