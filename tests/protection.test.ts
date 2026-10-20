@@ -37,12 +37,16 @@ test('quote prices the fee on top and refuses protection it cannot reserve', () 
   assert.equal(maxLiability(micros(100), 10_000, micros(250)), micros(100));
 });
 
+test('every default tier pays less off-site than on-site', () => {
+  for (const t of DEFAULT_SETTINGS.tiers) assert.ok(t.offsiteCoverageBps < t.onsiteCoverageBps, t.name);
+});
+
 test('off-site coverage scales down with pool health', () => {
   assert.equal(healthBps(micros(10_000), micros(5_000)), 10_000);
   assert.equal(healthBps(micros(2_500), micros(5_000)), 5_000);
   assert.equal(healthBps(-5, micros(5_000)), 0);
-  assert.equal(offsiteCoverageBps(tiers[1], 10_000), 2_000);
-  assert.equal(offsiteCoverageBps(tiers[1], 5_000), 1_000);
+  assert.equal(offsiteCoverageBps(tiers[1], 10_000), 3_500);
+  assert.equal(offsiteCoverageBps(tiers[1], 5_000), 1_750);
   assert.equal(offsiteCoverageBps(tiers[1], 0), 0);
   assert.equal(offsiteCoverageBps(null, 10_000), 0);
 });

@@ -20,8 +20,9 @@ test('an eligible off-site pull is scanned, claimed and paid at the lower off-si
   const pull = losingPull(s, wallet);
   const [candidate] = await s.claims.scan(wallet, activatedAt);
   assert.equal(candidate.eligible, true, candidate.reason ?? '');
-  assert.equal(candidate.coverageBps, 2_000, 'Collector off-site coverage at full pool health');
-  assert.equal(micros(candidate.rebateUsd), rebateMicros(micros(25), micros(pull.card.insuredValueUsd!), 2_000, offsiteRebateCapMicros(DEFAULT_SETTINGS)));
+  const collector = DEFAULT_SETTINGS.tiers[1].offsiteCoverageBps;
+  assert.equal(candidate.coverageBps, collector, 'Collector off-site coverage at full pool health');
+  assert.equal(micros(candidate.rebateUsd), rebateMicros(micros(25), micros(pull.card.insuredValueUsd!), collector, offsiteRebateCapMicros(DEFAULT_SETTINGS)));
   await s.claims.claim(wallet, activatedAt, pull.memo);
   assert.equal(await s.claims.step(), 1);
   assert.equal(await s.solana.usdcBalance(wallet), BigInt(micros(candidate.rebateUsd)));
