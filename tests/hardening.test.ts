@@ -7,6 +7,7 @@ import { isTransient } from '../server/orders';
 import { ApiError } from '../server/cc/client';
 import { ReviewRequired } from '../server/jobs';
 import { setup, settle, user } from './helpers';
+import { paymentFailure } from '../server/solana-live';
 
 test('error messages shown to visitors never contain secrets or URLs', () => {
   const original = config.SOLANA_RPC_URL;
@@ -140,4 +141,35 @@ test('turning off-site claims off stops payouts; a pasted transaction finds a pu
   assert.equal(await s.claims.step(), 0);
   assert.equal((await s.claims.list(wallet))[0].status, 'approved');
   await s.db.close();
+});
+
+test('a buyer without enough USDC or SOL is told why before being asked to sign', async () => {
+  const s = await setup(), { wallet } = await user(s);
+  s.solana.funds.set(wallet, { usdcAccount: false, usdcMicros: 0n, lamports: 1_000_000_000n });
+  await assert.rejects(s.orders.create(wallet, 25), /costs \$27\.50 in USDC and this wallet has \$0\.00/);
+  s.solana.funds.set(wallet, { usdcAccount: true, usdcMicros: 20_000_000n, lamports: 1_000_000_000n });
+  await assert.rejects(s.orders.create(wallet, 25), /has \$20\.00/);
+  s.solana.funds.set(wallet, { usdcAccount: true, usdcMicros: 30_000_000n, lamports: 0n });
+  await assert.rejects(s.orders.create(wallet, 25), /needs a little SOL/);
+  s.solana.funds.set(wallet, { usdcAccount: true, usdcMicros: 30_000_000n, lamports: 5_000_000n });
+  assert.equal((await s.orders.create(wallet, 25)).order.status, 'awaiting_payment');
+  await s.db.close();
+});
+
+test('orders wait until OPS has a USDC account, which the wallet task creates', async () => {
+  const s = await setup(), { wallet } = await user(s);
+  s.solana.usdcAccounts.clear();
+  await assert.rejects(s.orders.create(wallet, 25), /being set up/);
+  await s.gas.ensure();
+  assert.ok(await s.solana.hasUsdcAccount('ops') && await s.solana.hasUsdcAccount('pool'));
+  assert.equal((await s.orders.create(wallet, 25)).order.status, 'awaiting_payment');
+  await s.db.close();
+});
+
+test('failed payment broadcasts become one plain sentence', () => {
+  assert.match(paymentFailure('Transaction simulation failed: Error processing Instruction 2: invalid account data for instruction. Logs: [...]'), /no USDC yet/);
+  assert.match(paymentFailure('Attempt to debit an account but found no record of a prior credit.'), /little SOL/);
+  assert.match(paymentFailure('custom program error: 0x1'), /not have enough USDC/);
+  assert.match(paymentFailure('Blockhash not found'), /took too long/);
+  assert.doesNotMatch(paymentFailure('Program ComputeBudget111 failed: weird'), /Program|ComputeBudget/);
 });

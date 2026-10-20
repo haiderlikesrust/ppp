@@ -6,9 +6,18 @@ import type { Chain } from './chain';
 import { buildPayment, validatePaymentMessage, validateSignedPayment, type PaymentIntent } from './payment';
 import { parseCcPayment } from './cc/history';
 import { swap } from './swap';
-import { collectCreatorFees } from './fees';
+import { collectCreatorFees, creatorFeesDue } from './fees';
 import type { BuiltPayment, CcPayment, PaymentState, Solana } from './ports';
 import type { Settings } from '../shared/types';
+
+/** Turns a failed payment broadcast into one plain sentence; the raw RPC message is kept as `cause` for the logs. */
+export function paymentFailure(message: string) {
+  if (/debit an account but found no record|insufficient lamports|InsufficientFundsForFee|insufficient funds for fee/i.test(message)) return 'This wallet needs a little SOL (0.002 is plenty) to pay the Solana network fee. Nothing was charged.';
+  if (/insufficient funds|0x1\b/i.test(message)) return 'This wallet does not have enough USDC for this pack. Nothing was charged.';
+  if (/invalid account data|could not find account|AccountNotFound|0x3\b/i.test(message)) return 'This wallet has no USDC yet. Add USDC to it and try again. Nothing was charged.';
+  if (/blockhash not found|block height exceeded|expired/i.test(message)) return 'The payment took too long to approve. Please try again. Nothing was charged.';
+  return 'The payment could not be sent. Please try again. Nothing was charged.';
+}
 
 /** Mainnet adapter: OPS and POOL are separate signing wallets sharing one RPC. */
 export class LiveSolana implements Solana {
@@ -47,7 +56,7 @@ export class LiveSolana implements Solana {
     try { await this.requireRpc().sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 }); }
     catch (error) {
       const message = (error as Error).message;
-      throw new Error(/insufficient|0x1\b/i.test(message) ? 'Your wallet does not have enough USDC (or SOL for the network fee).' : `The payment could not be sent: ${message.slice(0, 160)}`);
+      throw Object.assign(new Error(paymentFailure(message), { cause: message }), { statusCode: 400 });
     }
     return bs58.encode(tx.signatures[0]);
   }
@@ -123,6 +132,21 @@ export class LiveSolana implements Solana {
   }
 
   collectCreatorFees(settings: Settings) { return collectCreatorFees(this.pool, settings); }
+  creatorFeesDue(settings: Settings) { return creatorFeesDue(this.pool, settings); }
+
+  async walletFunds(owner: string) {
+    const rpc = this.requireRpc(), key = new PublicKey(owner), ata = getAssociatedTokenAddressSync(new PublicKey(config.USDC_MINT), key, true);
+    const [account, lamports] = await Promise.all([rpc.getParsedAccountInfo(ata, 'confirmed'), rpc.getBalance(key, 'confirmed')]);
+    const parsed = (account.value?.data as { parsed?: { info?: { tokenAmount?: { amount?: string } } } } | undefined)?.parsed;
+    return { usdcAccount: !!account.value, usdcMicros: BigInt(parsed?.info?.tokenAmount?.amount ?? 0), lamports: BigInt(lamports) };
+  }
+
+  async hasUsdcAccount(wallet: 'ops' | 'pool') {
+    const owner = wallet === 'ops' ? this.opsAddress : this.poolAddress; if (!owner) return false;
+    return !!(await this.requireRpc().getAccountInfo(getAssociatedTokenAddressSync(new PublicKey(config.USDC_MINT), new PublicKey(owner)), 'confirmed'));
+  }
+
+  createUsdcAccount(wallet: 'ops' | 'pool', jobId: string, settings: Settings) { return (wallet === 'ops' ? this.ops : this.pool).createOwnTokenAccount(jobId, config.USDC_MINT, settings); }
 
   solBalance(wallet: 'ops' | 'pool') { return (wallet === 'ops' ? this.ops : this.pool).balance(NATIVE_MINT.toBase58()); }
 

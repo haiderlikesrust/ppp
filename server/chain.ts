@@ -153,6 +153,14 @@ export class Chain {
     }, settings);
   }
 
+  /** Creates this wallet's own token account for `mint` (no-op on chain if it already exists). */
+  async createOwnTokenAccount(id: string, mint: string, settings: Settings) {
+    return this.execute(id, 'token-account', async () => {
+      const { signer } = this.require(), m = new PublicKey(mint);
+      return this.build([ComputeBudgetProgram.setComputeUnitLimit({ units: 30_000 }), createAssociatedTokenAccountIdempotentInstruction(signer.publicKey, getAssociatedTokenAddressSync(m, signer.publicKey), signer.publicKey, m)]);
+    }, settings);
+  }
+
   /** Idempotent native SOL transfer (network-fee top-ups between our own wallets). */
   async sendSol(id: string, to: string, lamports: bigint, settings: Settings) {
     if (lamports <= 0n) throw new Error('Transfer amount must be positive.');

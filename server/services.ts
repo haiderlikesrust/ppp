@@ -1,7 +1,7 @@
 import { PublicKey } from '@solana/web3.js';
 import { config } from './config';
 import { openDatabase, migrate, Serial, type Database } from './db';
-import { Jobs } from './jobs';
+import { Jobs, PendingOperation } from './jobs';
 import { SettingsStore } from './settings';
 import { Chain, connection } from './chain';
 import { treasurySigner } from './treasury-signer';
@@ -72,6 +72,11 @@ export function startCoordinator(s: Services, log: (message: string, error?: unk
   // One RPC call per active wallet and no money: kept out of the queue so a long sweep never delays payments.
   every(15 * 60_000, 'snapshots', async () => { await s.holders.snapshotAll(); await s.holders.prune(); }, false);
   every(5 * 60_000, 'treasury', () => s.treasury.run());
+  // Creator fees: a read-only vault check every 10 seconds; claiming and swapping take a turn in the queue only when due.
+  every(10_000, 'creator-fees', async () => {
+    if (!(await s.treasury.creatorFeesDue())) return;
+    await s.serial.run(() => s.treasury.creatorFees(true)).catch(error => { if (!(error instanceof PendingOperation)) throw error; });
+  }, false);
   // One balance check per wallet; a top-up only when OPS runs low.
   every(30_000, 'gas', () => s.gas.ensure());
   every(5 * 60_000, 'cleanup', async () => { await s.db.query('DELETE FROM sessions WHERE expires_at<$1', [Date.now()]); await s.db.query('DELETE FROM challenges WHERE expires_at<$1', [Date.now()]); });

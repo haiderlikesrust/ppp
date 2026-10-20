@@ -35,6 +35,10 @@ export type Settings = {
   pausedPrices: number[];
   /** Daily creator-fee income the fee guardrail may count on (USD). */
   creatorFeeBudgetUsdPerDay: number;
+  /** Creator fees are checked every 10 seconds and claimed once at least this much (USD) has built up. 0 = any amount. */
+  creatorFeeMinUsd: number;
+  /** Largest price impact a creator-fee sale may have; bigger claims are sold in parts. 300 = 3%. */
+  maxPriceImpactBps: number;
   burnThresholdUsd: number;
   feeTransferThresholdUsd: number;
   gasReserveSol: number;

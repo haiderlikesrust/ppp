@@ -17,8 +17,14 @@ export function quote(inputMint: string, outputMint: string, amount: bigint, tak
   return jsonFetch(`${JUP}/order?${new URLSearchParams({ inputMint, outputMint, amount: amount.toString(), slippageBps: String(slippageBps), excludeRouters: 'jupiterz,dflow,okx', ...(taker ? { taker } : {}) })}`, { headers: { 'x-api-key': config.JUPITER_API_KEY } });
 }
 
-/** Jupiter (Metis only) swap with a guaranteed output floor. Adapted from grailshot Providers.swap. */
-export async function swap(chain: Chain, id: string, inputMint: string, outputMint: string, amount: bigint, settings: Settings, minOutput = 1n) {
+/** A quote that would move the price more than the caller allows; nothing was signed. */
+export class PriceImpactTooHigh extends Error {}
+
+/**
+ * Jupiter (Metis only) swap with a guaranteed output floor. Adapted from grailshot Providers.swap.
+ * `maxImpactBps` refuses quotes that would move the market more than that (fee sales split themselves on it).
+ */
+export async function swap(chain: Chain, id: string, inputMint: string, outputMint: string, amount: bigint, settings: Settings, minOutput = 1n, maxImpactBps?: number) {
   if (amount <= 0n) throw new Error('Swap amount must be positive.');
   let job = await chain.jobs.get(id);
   if (!job) await chain.jobs.put(id, 'swap', 'queued', { inputMint, outputMint, amount: amount.toString(), minOutput: minOutput.toString() });
@@ -28,6 +34,9 @@ export async function swap(chain: Chain, id: string, inputMint: string, outputMi
   const signature = await chain.execute(id, 'swap', async () => {
     const requestedAt = Date.now(), order = await quote(inputMint, outputMint, amount, chain.address!, settings.slippageBps);
     if (Date.now() - requestedAt > 10_000) throw new Error('Swap quote is stale. Retry with current pricing.');
+    // Jupiter reports impact as a negative fraction: -0.0068 is 0.68%.
+    const impactBps = Math.abs(Number(order.priceImpactPct ?? 0)) * 10_000;
+    if (maxImpactBps !== undefined && impactBps > maxImpactBps) throw new PriceImpactTooHigh(`Price impact ${(impactBps / 100).toFixed(2)}% is above the ${(maxImpactBps / 100).toFixed(2)}% limit.`);
     if (order.errorCode || !order.transaction) throw new Error(order.errorMessage || 'No supported swap route.');
     if (order.router !== 'metis' || order.inputMint !== inputMint || order.outputMint !== outputMint || BigInt(order.inAmount) !== amount) throw new ReviewRequired('Swap quote route, asset or amount mismatch.');
     const guaranteed = BigInt(order.outAmount) * (10_000n - BigInt(settings.slippageBps)) / 10_000n;

@@ -78,7 +78,17 @@ export class MockSolana implements Solana {
     const signature = this.done.get(jobId) ?? fakeSignature(); this.done.set(jobId, signature);
     return { tokens: BigInt(usdcMicros) * 4_000n, swapSignature: signature, burnSignature: signature };
   }
-  async collectCreatorFees() { return null; }
+  /** Tests can queue creator-fee results or errors. */
+  readonly feeResults: ({ id: string; usdcMicros: number; signature: string } | Error)[] = [];
+  async collectCreatorFees() { const next = this.feeResults.shift(); if (next instanceof Error) throw next; return next ?? null; }
+  async creatorFeesDue() { return this.feeResults.length > 0; }
+
+  /** Practice buyers have plenty unless a test sets their funds. */
+  readonly funds = new Map<string, { usdcAccount: boolean; usdcMicros: bigint; lamports: bigint }>();
+  async walletFunds(owner: string) { return this.funds.get(owner) ?? { usdcAccount: true, usdcMicros: 1_000_000_000_000n, lamports: 1_000_000_000n }; }
+  readonly usdcAccounts = new Set<'ops' | 'pool'>(['ops', 'pool']);
+  async hasUsdcAccount(wallet: 'ops' | 'pool') { return this.usdcAccounts.has(wallet); }
+  async createUsdcAccount(wallet: 'ops' | 'pool') { this.usdcAccounts.add(wallet); return fakeSignature(); }
 
   /** Lamports per wallet. Both start with 1 SOL. */
   readonly sol = new Map<'ops' | 'pool', bigint>([['ops', 1_000_000_000n], ['pool', 1_000_000_000n]]);

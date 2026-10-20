@@ -43,6 +43,14 @@ export interface Solana {
   buybackAndBurn(jobId: string, usdcMicros: number, settings: Settings): Promise<{ tokens: bigint; swapSignature: string; burnSignature: string }>;
   /** POOL: claims pump.fun creator fees and converts them to USDC. */
   collectCreatorFees(settings: Settings): Promise<{ id: string; usdcMicros: number; signature: string } | null>;
+  /** POOL: read-only check whether a claim is unfinished or enough creator fees have built up to claim. */
+  creatorFeesDue(settings: Settings): Promise<boolean>;
+  /** A buyer's USDC (in their associated token account) and SOL, checked before they are asked to sign. */
+  walletFunds(owner: string): Promise<{ usdcAccount: boolean; usdcMicros: bigint; lamports: bigint }>;
+  /** Whether OPS or POOL has its own USDC token account (needed to receive USDC). */
+  hasUsdcAccount(wallet: 'ops' | 'pool'): Promise<boolean>;
+  /** Creates that USDC token account, paid by the wallet itself. Idempotent per job id. */
+  createUsdcAccount(wallet: 'ops' | 'pool', jobId: string, settings: Settings): Promise<string>;
   /** Native SOL balance in lamports. */
   solBalance(wallet: 'ops' | 'pool'): Promise<bigint>;
   /** POOL sends OPS SOL for network fees. Idempotent per job id. */

@@ -6,7 +6,7 @@ import { api, money, pct } from '../api';
 import { useApp } from '../app';
 import { Empty, SectionTitle, packStyle } from '../ui';
 
-type Gas = { opsSol: number; poolSol: number; spentTodayUsd: number; opsReady: boolean };
+type Gas = { opsSol: number; poolSol: number; spentTodayUsd: number; opsReady: boolean; opsUsdcAccount: boolean; poolUsdcAccount: boolean };
 type Admin = { settings: Settings; version: string; gas: Gas | null; blockers: string[]; problems: string[]; calibration: { generatedAt: string; samples: number; distributions: any[] } | null; review: any[]; jobs: any[]; audit: any[] };
 
 export function AdminPage() {
@@ -87,7 +87,15 @@ export function AdminPage() {
       </div>
     </Section>
 
+    <Section title="Creator fees" sub="Your coin's pump.fun creator fees are checked every 10 seconds, claimed into POOL and sold for USDC. Big claims are sold in parts so the price is not pushed down too far.">
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Field label="Claim once at least $" hint="0 = claim any amount"><input className="input num" type="number" step="0.5" value={form.creatorFeeMinUsd} onChange={e => set('creatorFeeMinUsd', n(e.target.value))} /></Field>
+        <Field label="Max price impact %" hint="Larger claims are split"><input className="input num" type="number" step="0.5" value={form.maxPriceImpactBps / 100} onChange={e => set('maxPriceImpactBps', Math.round(n(e.target.value) * 100))} /></Field>
+      </div>
+    </Section>
+
     <Section title="Network fees (SOL)" sub="OPS pays a small SOL fee for every pack it buys, card it sends and refund. POOL tops it up automatically, and buys SOL with a little USDC when it runs low itself.">
+      {data.gas && (!data.gas.opsUsdcAccount || !data.gas.poolUsdcAccount) && <p className="mb-4 flex items-start gap-2 text-sm text-red"><AlertTriangle size={15} className="mt-0.5 shrink-0" />{[!data.gas.opsUsdcAccount && 'OPS', !data.gas.poolUsdcAccount && 'POOL'].filter(Boolean).join(' and ')} has no USDC account yet, so it can't receive USDC. It is created automatically once the wallet has a little SOL (press Top up now to retry). New orders wait until OPS has one.</p>}
       {data.gas && <div className="mb-5 grid gap-4 sm:grid-cols-3">
         <GasStat label="OPS wallet" sol={data.gas.opsSol} low={data.gas.opsSol < form.gas.opsMinSol} note={data.gas.opsReady ? undefined : 'Too low to open packs. New orders wait.'} />
         <GasStat label="POOL wallet" sol={data.gas.poolSol} low={data.gas.poolSol < form.gas.poolMinSol} note={data.gas.poolSol < form.gasReserveSol ? 'Send POOL some SOL by hand: it needs a little to pay for buying more.' : undefined} />

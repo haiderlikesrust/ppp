@@ -23,6 +23,7 @@ const MIN_TRANSFER = lamports(0.005);
  */
 export class Gas {
   private ops: { lamports: bigint; at: number } | null = null;
+  private opsUsdc: { ready: boolean; at: number } | null = null;
   private warnedAt = 0;
   constructor(readonly db: Database, readonly jobs: Jobs, readonly solana: Solana, readonly pool: Pool, readonly settings: SettingsStore) {}
 
@@ -32,17 +33,41 @@ export class Gas {
     return this.ops.lamports >= OPS_MIN_TO_SIGN;
   }
 
+  /** Whether OPS can receive buyers' USDC. Once true it stays true; while false it is rechecked every 10 seconds. */
+  async opsUsdcReady() {
+    if (!this.opsUsdc || (!this.opsUsdc.ready && Date.now() - this.opsUsdc.at > 10_000)) this.opsUsdc = { ready: await this.solana.hasUsdcAccount('ops'), at: Date.now() };
+    return this.opsUsdc.ready;
+  }
+
+  /** Creates OPS and POOL's USDC token accounts if missing: a new wallet cannot receive USDC without one. */
+  async accounts() {
+    for (const wallet of ['ops', 'pool'] as const) {
+      if (await this.solana.hasUsdcAccount(wallet)) continue;
+      try {
+        const signature = await this.solana.createUsdcAccount(wallet, `usdc-account:${wallet}`, this.settings.current);
+        await audit(this.db, 'usdc-account-created', { wallet, signature });
+      } catch (error) { if (!(error instanceof PendingOperation)) await this.warn(`Could not create the ${wallet.toUpperCase()} USDC account: ${(error as Error).message}`); }
+    }
+    this.opsUsdc = null;
+  }
+
   /** USDC the pool spent on SOL over the last 24 hours. */
   async spentToday() { return -(await sum(this.db, "bucket='pool' AND kind='gas' AND created_at>=$1", [Date.now() - 86_400_000])); }
 
   async status() {
     const [ops, pool, spent] = await Promise.all([this.solana.solBalance('ops'), this.solana.solBalance('pool'), this.spentToday()]);
-    return { opsSol: sol(ops), poolSol: sol(pool), spentTodayUsd: usd(spent), opsReady: ops >= OPS_MIN_TO_SIGN };
+    const [opsUsdc, poolUsdc] = await Promise.all([this.solana.hasUsdcAccount('ops'), this.solana.hasUsdcAccount('pool')]);
+    return { opsSol: sol(ops), poolSol: sol(pool), spentTodayUsd: usd(spent), opsReady: ops >= OPS_MIN_TO_SIGN, opsUsdcAccount: opsUsdc, poolUsdcAccount: poolUsdc };
   }
 
   async ensure() {
-    const s = this.settings.current, g = s.gas;
     if (!this.solana.canSpend) return null;
+    await this.accounts();
+    return this.topUp();
+  }
+
+  private async topUp() {
+    const s = this.settings.current, g = s.gas;
     let cycle = (await this.db.query("SELECT * FROM jobs WHERE kind='gas-cycle' AND status<>'complete' ORDER BY created_at LIMIT 1")).rows[0];
     if (!cycle) {
       const [ops, pool] = await Promise.all([this.solana.solBalance('ops'), this.solana.solBalance('pool')]);

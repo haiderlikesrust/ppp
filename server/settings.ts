@@ -18,6 +18,8 @@ export const settingsSchema: z.ZodType<Settings> = z.object({
   breaker: z.object({ lossRatioBps: z.number().int().min(0).max(1_000_000), minPacks: z.number().int().min(1).max(10_000), windowDays: z.number().int().min(1).max(90) }),
   pausedPrices: z.array(z.number().int().positive()).max(32),
   creatorFeeBudgetUsdPerDay: z.number().finite().min(0).max(10_000_000),
+  creatorFeeMinUsd: z.number().finite().min(0).max(100_000),
+  maxPriceImpactBps: z.number().int().min(10).max(5_000),
   burnThresholdUsd: z.number().finite().min(1).max(1_000_000),
   feeTransferThresholdUsd: z.number().finite().min(1).max(1_000_000),
   gasReserveSol: z.number().finite().min(0.01).max(100),

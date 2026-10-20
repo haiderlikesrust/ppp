@@ -23,6 +23,8 @@ export const DEFAULT_SETTINGS: Settings = {
   breaker: { lossRatioBps: 20_000, minPacks: 20, windowDays: 7 },
   pausedPrices: [],
   creatorFeeBudgetUsdPerDay: 0,
+  creatorFeeMinUsd: 2,
+  maxPriceImpactBps: 300,
   burnThresholdUsd: 25,
   feeTransferThresholdUsd: 5,
   gasReserveSol: 0.05,

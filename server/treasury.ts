@@ -59,12 +59,40 @@ export class Treasury {
     return { amount, tokens: result.tokens };
   }
 
-  async creatorFees() {
+  /** Backoff after errors, so a stuck swap is retried calmly and logged once per distinct error. */
+  private fees = { failures: 0, until: 0, lastError: '' };
+
+  /**
+   * Read-only check run every 10 seconds outside the queue: is a claim unfinished, or have enough
+   * creator fees built up (`creatorFeeMinUsd`)? Only then does the claim and swap take a turn in the queue.
+   */
+  async creatorFeesDue() {
     // Claiming needs the POOL signer; before mainnet is enabled there is nothing to do.
+    if (this.settings.current.paused || !this.solana.live || Date.now() < this.fees.until) return false;
+    try { return await this.solana.creatorFeesDue(this.settings.current); }
+    catch (error) { await this.feeError(error); return false; }
+  }
+
+  /** Claims creator fees into POOL and sells them for USDC. `checked` skips the due check the loop already made. */
+  async creatorFees(checked = false) {
+    if (!checked && !(await this.creatorFeesDue())) return null;
     if (this.settings.current.paused || !this.solana.live) return null;
-    const result = await this.solana.collectCreatorFees(this.settings.current);
-    if (result) { this.pool.invalidate(); await audit(this.db, 'creator-fees', result); }
-    return result;
+    try {
+      const result = await this.solana.collectCreatorFees(this.settings.current);
+      this.fees = { failures: 0, until: 0, lastError: '' };
+      if (result) { this.pool.invalidate(); await audit(this.db, 'creator-fees', result); }
+      return result;
+    } catch (error) {
+      if (!(error instanceof PendingOperation)) await this.feeError(error);
+      throw error;
+    }
+  }
+
+  private async feeError(error: unknown) {
+    const message = (error as Error).message, failures = this.fees.failures + 1, repeated = message === this.fees.lastError;
+    // 10s, 20s, 40s … up to 10 minutes between attempts while it keeps failing.
+    this.fees = { failures, until: Date.now() + Math.min(600_000, 10_000 * 2 ** Math.min(failures - 1, 6)), lastError: message };
+    if (!repeated) await audit(this.db, 'creator-fees-error', { error: message, failures });
   }
 
   /** Runs every task, isolating failures so one stuck task cannot block the others. */
@@ -72,7 +100,7 @@ export class Treasury {
     const out: Record<string, unknown> = {};
     for (const [name, task] of [['transfer', () => this.transferFees()], ['burn', () => this.burn()], ['creatorFees', () => this.creatorFees()]] as const) {
       try { out[name] = await task(); }
-      catch (error) { out[name] = { error: (error as Error).message }; if (!(error instanceof PendingOperation)) await audit(this.db, `treasury-${name}-error`, { error: (error as Error).message }); }
+      catch (error) { out[name] = { error: (error as Error).message }; if (!(error instanceof PendingOperation) && name !== 'creatorFees') await audit(this.db, `treasury-${name}-error`, { error: (error as Error).message }); }
     }
     return out;
   }

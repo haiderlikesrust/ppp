@@ -16,6 +16,8 @@ const direct: Runner = fn => fn();
 const PAYMENT_WINDOW_MS = 120_000;
 // Transient failures back off up to 5 minutes, so ~40 attempts ride out a couple of hours of
 // provider or RPC trouble before an order is handed to the owner for review.
+/** Enough SOL for the payment's fee while the wallet stays rent-exempt. */
+const BUYER_MIN_LAMPORTS = 1_000_000n;
 /** Order steps where the OPS wallet signs a transaction and so pays network fees. */
 const OPS_SIGNS: OrderStatus[] = ['paid', 'buying', 'delivering', 'refunding'];
 const MAX_FAILURES = 40;
@@ -76,6 +78,11 @@ export class Orders {
     const check = await this.holders.onsiteTier(wallet);
     const first = quote(priceUsd, check.tier, s, await this.pool.free());
     if (!first.protected) throw new Error(first.reason ?? check.reason ?? 'This pack cannot be protected right now.');
+    if (!(await this.gas.opsUsdcReady())) throw Object.assign(new Error('Payments are being set up. Please try again in a minute. Nothing was charged.'), { statusCode: 503 });
+    // Catch an unpayable order here, with a clear reason, instead of as a failed simulation after signing.
+    const funds = await this.solana.walletFunds(wallet), dollars = (m: bigint | number) => `$${usd(Number(m)).toFixed(2)}`;
+    if (!funds.usdcAccount || funds.usdcMicros < BigInt(first.totalMicros)) throw new Error(`This pack costs ${dollars(first.totalMicros)} in USDC and this wallet has ${dollars(funds.usdcMicros)}. Add USDC to this wallet and try again.`);
+    if (funds.lamports < BUYER_MIN_LAMPORTS) throw new Error('This wallet needs a little SOL (0.002 is plenty) to pay the Solana network fee.');
     const id = randomUUID();
     const payment = await this.solana.buildUserPayment(wallet, first.totalMicros, `pp-${id}`);
     return run(async () => {

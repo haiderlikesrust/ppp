@@ -44,6 +44,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
     if (e instanceof z.ZodError) return reply.code(400).send({ error: 'Check the submitted fields.', fields: e.issues.map(i => i.path.join('.')) });
     const { status, message } = publicError(e);
     if (status >= 500) app.log.error({ message: redact(e.message), path: req.url }, 'Request failed');
+    else if (e.cause) app.log.warn({ message: e.message, cause: redact(String(e.cause)), path: req.url }, 'Request refused');
     return reply.code(status).send({ error: message });
   });
 
