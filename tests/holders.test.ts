@@ -18,16 +18,16 @@ test('tier is the lowest balance across the window, so a flash buy does not qual
 
 test('moving one bag between wallets leaves a dip that drops the tier', async () => {
   const s = await setup(), a = Keypair.generate().publicKey.toBase58(), now = Date.now();
-  s.solana.setHolderPpm(a, 3_000); await s.holders.snapshot(a, now - 25 * HOUR);
+  s.solana.setHolderPpm(a, 10_000); await s.holders.snapshot(a, now - 25 * HOUR);
   s.solana.setHolderPpm(a, 0); await s.holders.snapshot(a, now - 10 * HOUR);
-  s.solana.setHolderPpm(a, 3_000); await s.holders.snapshot(a, now - HOUR);
+  s.solana.setHolderPpm(a, 10_000); await s.holders.snapshot(a, now - HOUR);
   assert.equal((await s.holders.tierFor(a, now - 24 * HOUR, now)).tier, null);
   await s.db.close();
 });
 
 test('a steady holder keeps their tier; no record before the window means no tier', async () => {
   const s = await setup(), wallet = Keypair.generate().publicKey.toBase58(), now = Date.now();
-  s.solana.setHolderPpm(wallet, 3_000);
+  s.solana.setHolderPpm(wallet, 10_000);
   await s.holders.snapshot(wallet, now - 48 * HOUR); await s.holders.snapshot(wallet, now - 12 * HOUR);
   assert.equal((await s.holders.tierFor(wallet, now - 24 * HOUR, now)).tier?.id, 't2');
   assert.match((await s.holders.tierFor(wallet, now - 72 * HOUR, now)).reason!, /no record/);
@@ -36,18 +36,18 @@ test('a steady holder keeps their tier; no record before the window means no tie
 
 test('off-site coverage is immediate: a new wallet is judged on the balances seen since it connected', async () => {
   const s = await setup(), wallet = Keypair.generate().publicKey.toBase58(), now = Date.now();
-  s.solana.setHolderPpm(wallet, 3_000); await s.holders.snapshot(wallet, now - 10 * HOUR);
+  s.solana.setHolderPpm(wallet, 10_000); await s.holders.snapshot(wallet, now - 10 * HOUR);
   assert.equal((await s.holders.offsiteTier(wallet, now - 10 * HOUR, now - 12 * HOUR)).tier?.id, 't2', 'pull before connecting still counts');
   // A dip after connecting still lowers the tier.
   s.solana.setHolderPpm(wallet, 0); await s.holders.snapshot(wallet, now - 5 * HOUR);
-  s.solana.setHolderPpm(wallet, 3_000);
+  s.solana.setHolderPpm(wallet, 10_000);
   assert.equal((await s.holders.offsiteTier(wallet, now - 10 * HOUR, now - 12 * HOUR)).tier, null);
   await s.db.close();
 });
 
 test('an activation delay, when the owner sets one, blocks pulls from before it', async () => {
   const s = await setup({ offsiteActivationHours: 24 }), wallet = Keypair.generate().publicKey.toBase58(), now = Date.now();
-  s.solana.setHolderPpm(wallet, 3_000); await s.holders.snapshot(wallet, now - 48 * HOUR);
+  s.solana.setHolderPpm(wallet, 10_000); await s.holders.snapshot(wallet, now - 48 * HOUR);
   assert.match((await s.holders.offsiteTier(wallet, now - 10 * HOUR, now - HOUR)).reason!, /starts 24h/);
   assert.equal((await s.holders.offsiteTier(wallet, now - 48 * HOUR, now - HOUR)).tier?.id, 't2');
   await s.db.close();

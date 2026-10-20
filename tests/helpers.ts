@@ -15,7 +15,7 @@ export async function setup(settings: Partial<Settings> = {}) {
   return { ...s, solana, packs };
 }
 
-export async function user(s: Awaited<ReturnType<typeof setup>>, ppm = 3_000, activatedAgoHours = 0) {
+export async function user(s: Awaited<ReturnType<typeof setup>>, ppm = 10_000, activatedAgoHours = 0) {
   const wallet = Keypair.generate().publicKey.toBase58();
   s.solana.setHolderPpm(wallet, ppm);
   await createSession(s.db, wallet);

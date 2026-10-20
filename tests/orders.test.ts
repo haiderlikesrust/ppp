@@ -6,7 +6,7 @@ import { createServices } from '../server/services';
 import { rebateMicros, micros } from '../shared/protection';
 
 test('happy path: pay, buy, deliver, auto-rebate, fee split, reservation released', async () => {
-  const s = await setup(), { wallet } = await user(s, 3_000);
+  const s = await setup(), { wallet } = await user(s, 10_000);
   const poolBefore = await s.pool.balance();
   const { order, transaction } = await s.orders.create(wallet, 25);
   assert.equal(order.status, 'awaiting_payment');
@@ -29,7 +29,7 @@ test('happy path: pay, buy, deliver, auto-rebate, fee split, reservation release
 });
 
 test('a wallet without a tier cannot buy protection, and only one unpaid order is allowed', async () => {
-  const s = await setup(), poor = await user(s, 0), { wallet } = await user(s, 3_000);
+  const s = await setup(), poor = await user(s, 0), { wallet } = await user(s, 10_000);
   await assert.rejects(s.orders.create(poor.wallet, 25), /Hold more/);
   await s.orders.create(wallet, 25);
   await assert.rejects(s.orders.create(wallet, 50), /current order/);
@@ -72,7 +72,7 @@ test('selling tokens between quote and settlement lowers the rebate', async () =
   const s = await setup(), { wallet } = await user(s, 20_000);
   const { order } = await s.orders.create(wallet, 25);
   await s.orders.pay(wallet, order.id, 'practice');
-  s.solana.setHolderPpm(wallet, 3_000);
+  s.solana.setHolderPpm(wallet, 10_000);
   const done = await settle(s, order.id);
   assert.equal(done.coverageBps, 5_000, 'settled at the lower tier');
   await s.db.close();

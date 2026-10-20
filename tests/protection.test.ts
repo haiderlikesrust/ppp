@@ -7,10 +7,12 @@ const ofSupply = (ppm: number) => supply * BigInt(ppm) / 1_000_000n;
 
 test('holder tiers use share of supply with inclusive boundaries', () => {
   assert.equal(holderTier(0n, supply, tiers), null);
-  assert.equal(holderTier(ofSupply(499), supply, tiers), null);
-  assert.equal(holderTier(ofSupply(500), supply, tiers)?.id, 't1');
-  assert.equal(holderTier(ofSupply(2_499), supply, tiers)?.id, 't1');
-  assert.equal(holderTier(ofSupply(2_500), supply, tiers)?.id, 't2');
+  assert.equal(holderTier(ofSupply(999), supply, tiers), null, 'just under 0.1%');
+  assert.equal(holderTier(ofSupply(1_000), supply, tiers)?.id, 't1', 'Holder at 0.1%');
+  assert.equal(holderTier(ofSupply(9_999), supply, tiers)?.id, 't1');
+  assert.equal(holderTier(ofSupply(10_000), supply, tiers)?.id, 't2', 'Collector at 1%');
+  assert.equal(holderTier(ofSupply(19_999), supply, tiers)?.id, 't2');
+  assert.equal(holderTier(ofSupply(20_000), supply, tiers)?.id, 't3', 'Whale at 2%');
   assert.equal(holderTier(ofSupply(50_000), supply, tiers)?.id, 't3');
   assert.equal(holderTier(ofSupply(50_000), 0n, tiers), null);
 });

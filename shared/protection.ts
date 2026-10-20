@@ -11,8 +11,8 @@ export const DEFAULT_SETTINGS: Settings = {
   feeBps: 1_000,
   poolShareBps: 5_000,
   tiers: [
-    { id: 't1', name: 'Holder', minSupplyPpm: 500, onsiteCoverageBps: 2_500, offsiteCoverageBps: 1_000 },
-    { id: 't2', name: 'Collector', minSupplyPpm: 2_500, onsiteCoverageBps: 5_000, offsiteCoverageBps: 2_000 },
+    { id: 't1', name: 'Holder', minSupplyPpm: 1_000, onsiteCoverageBps: 2_500, offsiteCoverageBps: 1_000 },
+    { id: 't2', name: 'Collector', minSupplyPpm: 10_000, onsiteCoverageBps: 5_000, offsiteCoverageBps: 2_000 },
     { id: 't3', name: 'Whale', minSupplyPpm: 20_000, onsiteCoverageBps: 10_000, offsiteCoverageBps: 3_500 },
   ],
   maxRebateUsd: 250,

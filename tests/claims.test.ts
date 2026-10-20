@@ -16,7 +16,7 @@ function pull(s: Awaited<ReturnType<typeof setup>>, wallet: string, loss: boolea
 const losingPull = (s: Awaited<ReturnType<typeof setup>>, wallet: string, hoursAgo = 1) => pull(s, wallet, true, hoursAgo);
 
 test('an eligible off-site pull is scanned, claimed and paid at the lower off-site coverage', async () => {
-  const s = await setup(), { wallet, activatedAt } = await user(s, 3_000, 48);
+  const s = await setup(), { wallet, activatedAt } = await user(s, 10_000, 48);
   const pull = losingPull(s, wallet);
   const [candidate] = await s.claims.scan(wallet, activatedAt);
   assert.equal(candidate.eligible, true, candidate.reason ?? '');
@@ -33,7 +33,7 @@ test('an eligible off-site pull is scanned, claimed and paid at the lower off-si
 
 test('a holder who just connected is covered right away, even for a pull made before connecting; a non-holder is not', async () => {
   const s = await setup();
-  const fresh = await user(s, 3_000, 0);
+  const fresh = await user(s, 10_000, 0);
   const earlier = losingPull(s, fresh.wallet, 5);
   const [candidate] = await s.claims.scan(fresh.wallet, fresh.activatedAt);
   assert.equal(candidate.eligible, true, candidate.reason ?? '');
@@ -46,7 +46,7 @@ test('a holder who just connected is covered right away, even for a pull made be
 
 test('an owner-set coverage delay still applies when configured', async () => {
   const s = await setup({ offsiteActivationHours: 24 });
-  const fresh = await user(s, 3_000, 0);
+  const fresh = await user(s, 10_000, 0);
   losingPull(s, fresh.wallet);
   assert.match((await s.claims.scan(fresh.wallet, fresh.activatedAt))[0].reason!, /starts 24h after you first connect/);
   await s.db.close();
@@ -54,7 +54,7 @@ test('an owner-set coverage delay still applies when configured', async () => {
 
 test('the daily claim limit blocks extra claims until the 24h window rolls', async () => {
   const s = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, perWalletDailyClaims: 2 } });
-  const { wallet, activatedAt } = await user(s, 3_000, 0);
+  const { wallet, activatedAt } = await user(s, 10_000, 0);
   const pulls = [losingPull(s, wallet), losingPull(s, wallet), losingPull(s, wallet)];
   await s.claims.claim(wallet, activatedAt, pulls[0].memo);
   await s.claims.claim(wallet, activatedAt, pulls[1].memo);
@@ -83,7 +83,7 @@ test('the daily payout cap queues the rest, and no single rebate exceeds it', as
 });
 
 test('a pack whose record belongs to another wallet cannot be claimed', async () => {
-  const s = await setup(), { wallet, activatedAt } = await user(s, 3_000, 48), thief = await user(s, 3_000, 48);
+  const s = await setup(), { wallet, activatedAt } = await user(s, 10_000, 48), thief = await user(s, 10_000, 48);
   const pull = losingPull(s, wallet);
   s.solana.ccPayments.set(thief.wallet, s.solana.ccPayments.get(wallet)!);
   const [candidate] = await s.claims.scan(thief.wallet, thief.activatedAt);
@@ -95,7 +95,7 @@ test('a pack whose record belongs to another wallet cannot be claimed', async ()
 
 test('refunded packs, winning pulls and old pulls are rejected', async () => {
   const s = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, claimWindowDays: 2 } });
-  const { wallet, activatedAt } = await user(s, 3_000, 24 * 10);
+  const { wallet, activatedAt } = await user(s, 10_000, 24 * 10);
   const refunded = losingPull(s, wallet);
   const record = await s.packs.status(refunded.memo);
   s.packs.setRecord(refunded.memo, { ...record, pack: { ...record.pack, refunded: true } });
@@ -125,7 +125,7 @@ test('the per-wallet weekly cap queues claims instead of paying them', async () 
 });
 
 test('pulls opened on our site cannot also be claimed off-site', async () => {
-  const s = await setup(), { wallet, activatedAt } = await user(s, 3_000, 48);
+  const s = await setup(), { wallet, activatedAt } = await user(s, 10_000, 48);
   const pull = losingPull(s, wallet);
   await s.db.query("INSERT INTO pulls(memo,source,wallet,price_micros,value_micros,nft_mint,pulled_at,data) VALUES($1,'onsite',$2,25000000,1,'m',0,'{}')", [pull.memo, wallet]);
   assert.match((await s.claims.scan(wallet, activatedAt))[0].reason!, /Opened on our site/);
@@ -133,11 +133,11 @@ test('pulls opened on our site cannot also be claimed off-site', async () => {
 });
 
 test('there is no pool-wide daily cap by default; if the owner sets one, claims past it queue', async () => {
-  const open = await setup(), a = await user(open, 3_000, 0);
+  const open = await setup(), a = await user(open, 10_000, 0);
   assert.equal((await open.pool.offsiteRoom(a.wallet)).global, Infinity);
   await open.db.close();
   // 0.01% of a $10,000 pool is $1 a day across everyone.
-  const capped = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, dailyPoolBps: 1 } }), b = await user(capped, 3_000, 0);
+  const capped = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, dailyPoolBps: 1 } }), b = await user(capped, 10_000, 0);
   const p = losingPull(capped, b.wallet);
   await capped.claims.claim(b.wallet, b.activatedAt, p.memo);
   await capped.claims.step();

@@ -17,7 +17,7 @@ export function PracticeDrawer() {
     <p className="mt-1 text-xs text-muted">Fake balances and a mocked Collector Crypt. Nothing here touches real money.</p>
     <div className="label mt-4">Your holdings</div>
     <div className="mt-2 grid grid-cols-4 gap-1.5">
-      {[[0, 'None'], [500, 'Holder'], [3_000, 'Collector'], [20_000, 'Whale']].map(([value, label]) =>
+      {[[0, 'None'], [1_000, 'Holder'], [10_000, 'Collector'], [20_000, 'Whale']].map(([value, label]) =>
         <button key={value} className={`btn btn-sm px-2 ${ppm === value ? 'btn-ink' : 'btn-ghost'}`} onClick={() => run('/practice/holdings', { ppm: value }, `Holdings set to ${label}.`)}>{label}</button>)}
     </div>
     <div className="label mt-4">Off-site pulls</div>

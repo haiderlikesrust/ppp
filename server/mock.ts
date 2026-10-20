@@ -28,7 +28,7 @@ export class MockSolana implements Solana {
   /** Number of status checks before a payment confirms; 0 makes tests deterministic. */
   confirmAfterChecks = 0;
   private checks = new Map<string, number>();
-  defaultHolderPpm = 3_000;
+  defaultHolderPpm = 10_000;
 
   constructor() { this.usdc.set(this.poolAddress, 10_000_000_000n); }
   async holderBalance(owner: string) { return this.holders.get(owner) ?? this.supply * BigInt(this.defaultHolderPpm) / 1_000_000n; }
