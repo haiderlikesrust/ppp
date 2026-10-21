@@ -55,7 +55,7 @@ export class CollectorCryptPacks implements PackProvider {
 
   buybackQuote(mint: string) { return this.client.buybackQuote(mint); }
   buyback(owner: string, mint: string) { return this.client.buyback(owner, mint); }
-  submitBuyback(signedBase64: string) { return this.client.submitTransaction(signedBase64); }
+  async submitBuyback(signedBase64: string) { return (await this.client.submitTransaction(signedBase64)).signature; }
 
   status(memo: string) { return this.client.packStatus(memo); }
 

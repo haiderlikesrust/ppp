@@ -46,20 +46,30 @@ export async function buyPack(options: {
       else {
         const tx = VersionedTransaction.deserialize(Buffer.from(order.signedTransaction, 'base64'));
         if ((await connection.isBlockhashValid(tx.message.recentBlockhash, { commitment: 'confirmed' })).value) {
-          await connection.sendRawTransaction(Buffer.from(order.signedTransaction, 'base64'), { skipPreflight: false, maxRetries: 2 });
-          return pending('Payment submitted. Resume this order to check confirmation.');
+          // Official flow: submit via Collector Crypt so they register the payment. Raw RPC alone is how
+          // packs end up paid on-chain but invisible to /pack/status (and stuck until an openPack nudge).
+          try {
+            const submitted = await client.submitTransaction(order.signedTransaction);
+            if (submitted.confirmationStatus === 'confirmed' || submitted.confirmationStatus === 'finalized') {
+              order.paid = true; await store.save(order);
+            } else return pending('Payment submitted. Resume this order to check confirmation.');
+          } catch {
+            await connection.sendRawTransaction(Buffer.from(order.signedTransaction, 'base64'), { skipPreflight: false, maxRetries: 2 });
+            return pending('Payment submitted. Resume this order to check confirmation.');
+          }
+        } else {
+          // The blockhash is dead, so the payment can never land later. Chain history decides what happened.
+          const landed = await connection.getTransaction(order.signature!, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' });
+          if (landed && !landed.meta) return pending('Waiting for complete transaction history.');
+          if (landed?.meta?.err) throw new Error('Pack payment failed on-chain; no USDC moved.');
+          if (!landed) {
+            // One empty answer can be a lagging node. Look again a minute later before calling it never landed.
+            if (!order.expiredSeenAt) { order.expiredSeenAt = Date.now(); await store.save(order); return pending('Checking that the pack payment really expired.'); }
+            if (Date.now() - order.expiredSeenAt < 60_000) return pending('Checking that the pack payment really expired.');
+            throw new Error('Pack payment expired before landing; no USDC moved.');
+          }
+          order.paid = true; await store.save(order);
         }
-        // The blockhash is dead, so the payment can never land later. Chain history decides what happened.
-        const landed = await connection.getTransaction(order.signature!, { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' });
-        if (landed && !landed.meta) return pending('Waiting for complete transaction history.');
-        if (landed?.meta?.err) throw new Error('Pack payment failed on-chain; no USDC moved.');
-        if (!landed) {
-          // One empty answer can be a lagging node. Look again a minute later before calling it never landed.
-          if (!order.expiredSeenAt) { order.expiredSeenAt = Date.now(); await store.save(order); return pending('Checking that the pack payment really expired.'); }
-          if (Date.now() - order.expiredSeenAt < 60_000) return pending('Checking that the pack payment really expired.');
-          throw new Error('Pack payment expired before landing; no USDC moved.');
-        }
-        order.paid = true; await store.save(order);
       }
     }
     const status = await client.packStatus(order.memo!);

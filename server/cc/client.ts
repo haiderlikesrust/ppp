@@ -11,9 +11,9 @@ export class ApiError extends Error {
 export const machineUnavailable = (error: unknown) => error instanceof ApiError && /machine is (low|off|empty)|off balance/i.test(error.detail);
 export class CollectorCrypt {
   constructor(private readonly apiKey = '', private readonly fetcher: typeof fetch = fetch) {}
-  private async request(path: string, body?: unknown): Promise<any> {
+  private async request(path: string, body?: unknown, timeoutMs = 15_000): Promise<any> {
     const response = await this.fetcher(`https://gacha.collectorcrypt.com/api${path}`, {
-      method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000),
+      method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
       headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(this.apiKey ? { 'x-api-key': this.apiKey } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -60,10 +60,15 @@ export class CollectorCrypt {
     if (typeof offer.serializedTransaction !== 'string' || !Number.isSafeInteger(amount) || amount < 10_000 || amount > 280_000_000_000) throw new Error('Collector Crypt did not return a sell offer.');
     return { transaction: offer.serializedTransaction as string, amountMicros: amount };
   }
-  async submitTransaction(signedTransaction: string) {
-    const result = await this.request('/submitTransaction', { signedTransaction });
-    if (!result.success || typeof result.signature !== 'string') throw new Error('Collector Crypt did not accept the signed sale.');
-    return result.signature as string;
+  /**
+   * Broadcasts a signed tx through Collector Crypt so they register it (packs and buybacks).
+   * Prefer this over a raw RPC send for pack payments: their indexer often misses those.
+   */
+  async submitTransaction(signedTransaction: string): Promise<{ signature: string; confirmationStatus?: string }> {
+    // Their handler waits for confirmation (often 1–several seconds); give it more room than a status poll.
+    const result = await this.request('/submitTransaction', { signedTransaction }, 45_000);
+    if (!result.success || typeof result.signature !== 'string') throw new Error('Collector Crypt did not accept the signed transaction.');
+    return { signature: result.signature, confirmationStatus: typeof result.confirmationStatus === 'string' ? result.confirmationStatus : undefined };
   }
   /** Reads metadata for an existing purchase by memo (no payment or opening). */
   async cardDetails(memo: string, dasRpcUrl?: string): Promise<Card | null> {

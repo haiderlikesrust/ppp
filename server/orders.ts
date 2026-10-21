@@ -285,7 +285,7 @@ export class Orders {
           if (isTransient(error)) throw error;
           throw new ReviewRequired(message);
         }
-        if (result.state === 'pending') return this.save(row, 'buying', { purchaseId, message: 'Collector Crypt is opening your pack.', failures: 0 });
+        if (result.state === 'pending') return this.save(row, 'buying', { purchaseId, message: result.message || 'Collector Crypt is opening your pack.', failures: 0 });
         const value = result.card.insuredValueUsd;
         // No insured value yet: deliver the card anyway and read the value again when settling.
         await atomic(this.db, async () => {
