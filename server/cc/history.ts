@@ -24,8 +24,11 @@ export function parseCcPayment(tx: ParsedTransactionWithMeta | null, wallet: str
     if (ix.program === 'spl-memo' && typeof ix.parsed === 'string') memos.push(ix.parsed);
     if (ix.program === 'spl-token' && (ix.parsed?.type === 'transfer' || ix.parsed?.type === 'transferChecked')) {
       const info = ix.parsed.info, amount = info.tokenAmount?.amount ?? info.amount;
+      // Single-signer transfers normally expose `authority`; some wallets encode the same
+      // payment as a 1-of-1 multisig, which RPC parses as `multisigAuthority` instead.
+      const authority = info.authority ?? info.multisigAuthority;
       if (info.destination !== ccAta) continue;
-      if (info.source !== userAta || info.authority !== wallet) { foreignTransfers++; continue; }
+      if (info.source !== userAta || authority !== wallet) { foreignTransfers++; continue; }
       transfers.push({ amount: BigInt(amount) });
     }
   }

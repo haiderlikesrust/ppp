@@ -16,6 +16,13 @@ test('recognizes a pack payment made by the wallet itself', () => {
   assert.equal(parseCcPayment(tx([memoIx(), { program: 'spl-token', parsed: { type: 'transfer', info: { source: userAta, destination: ccAta, authority: wallet, amount: '50000000' } } }]), wallet, userAta, ccAta)?.priceMicros, 50_000_000);
 });
 
+test('recognizes a 1-of-1 multisigAuthority transfer (some wallets encode pack payments this way)', () => {
+  // Real RPC shape for nB79Msqg…: no `authority`, only `multisigAuthority` + `signers`.
+  const multisig = { program: 'spl-token', parsed: { type: 'transferChecked', info: { source: userAta, destination: ccAta, multisigAuthority: wallet, signers: [wallet], mint: 'EPj', tokenAmount: { amount: '50000000' } } } };
+  assert.equal(parseCcPayment(tx([memoIx(), multisig]), wallet, userAta, ccAta)?.priceMicros, 50_000_000);
+  assert.equal(parseCcPayment(tx([memoIx(), { ...multisig, parsed: { ...multisig.parsed, info: { ...multisig.parsed.info, multisigAuthority: 'Someone' } } }]), wallet, userAta, ccAta), null, 'wrong multisig authority');
+});
+
 test('packs opened through other apps that sell Collector Crypt packs are recognized too', () => {
   for (const app of ['jupiter', '6hjcq', 'slabz']) {
     const other = `${app}-d2a58146-0b78-44b2-a318-6e1e3558c9a0`;
