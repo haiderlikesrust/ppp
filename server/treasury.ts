@@ -63,7 +63,7 @@ export class Treasury {
   private fees = { failures: 0, until: 0, lastError: '' };
 
   /**
-   * Read-only check run every 10 seconds outside the queue: is a claim unfinished, or have enough
+   * Read-only check run every second outside the queue: is a claim unfinished, or have enough
    * creator fees built up (`creatorFeeMinUsd`)? Only then does the claim and swap take a turn in the queue.
    */
   async creatorFeesDue() {

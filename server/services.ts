@@ -74,8 +74,9 @@ export function startCoordinator(s: Services, log: (message: string, error?: unk
   // One RPC call per active wallet and no money: kept out of the queue so a long sweep never delays payments.
   every(15 * 60_000, 'snapshots', async () => { await s.holders.snapshotAll(); await s.holders.prune(); }, false);
   every(5 * 60_000, 'treasury', () => s.treasury.run());
-  // Creator fees: a read-only vault check every 10 seconds; claiming and swapping take a turn in the queue only when due.
-  every(10_000, 'creator-fees', async () => {
+  // Creator fees: a read-only vault check every second; claiming and swapping take a turn in the queue only when due.
+  // A check still running when the next second comes skips that tick.
+  every(1_000, 'creator-fees', async () => {
     if (!(await s.treasury.creatorFeesDue())) return;
     await s.serial.run(() => s.treasury.creatorFees(true)).catch(error => { if (!(error instanceof PendingOperation)) throw error; });
   }, false);

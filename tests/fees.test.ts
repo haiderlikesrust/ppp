@@ -4,6 +4,8 @@ import { setup } from './helpers';
 import { PriceImpactTooHigh, swap } from '../server/swap';
 import { DEFAULT_SETTINGS } from '../shared/protection';
 import type { Chain } from '../server/chain';
+import { usdcValue } from '../server/fees';
+import { config } from '../server/config';
 
 test('creator fees are claimed when due; a failing claim backs off and is logged once', async () => {
   const s = await setup();
@@ -21,6 +23,18 @@ test('creator fees are claimed when due; a failing claim backs off and is logged
   const logged = (await s.db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM audit WHERE event='creator-fees-error'")).rows[0].n;
   assert.equal(logged, 1, 'the same error is logged once');
   await s.db.close();
+});
+
+test('the every-second fee check reuses a price for 30 seconds instead of quoting Jupiter each time', async () => {
+  const mint = 'So11111111111111111111111111111111111111112', quotes: bigint[] = [];
+  const getQuote = (async (_in: string, _out: string, amount: bigint) => { quotes.push(amount); return { outAmount: String(amount * 2n) }; }) as any;
+  const t = Date.now();
+  assert.equal(await usdcValue(mint, 1_000n, t, getQuote), 2_000);
+  assert.equal(await usdcValue(mint, 3_000n, t + 29_000, getQuote), 6_000, 'a bigger balance is valued at the same price');
+  assert.deepEqual(quotes, [1_000n], 'one quote for both checks');
+  await usdcValue(mint, 3_000n, t + 31_000, getQuote);
+  assert.deepEqual(quotes, [1_000n, 3_000n], 'quoted again after 30 seconds');
+  assert.equal(await usdcValue(config.USDC_MINT, 7n, t, getQuote), 7, 'USDC needs no quote');
 });
 
 test('a fee sale is refused before signing when it would move the price too much', async () => {

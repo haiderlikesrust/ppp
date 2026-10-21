@@ -33,15 +33,26 @@ async function claimable(pool: Chain): Promise<Claimable | null> {
   return { quoteMint: quoteMint.toBase58(), amount: BigInt(balance.total.toString()), creator: curve.creator.toBase58(), sharing, graduated: curve.complete };
 }
 
+/** USDC per smallest unit of the fee mint, from a Jupiter quote. Reused for 30 seconds: the due check runs every second. */
+let unitPrice: { mint: string; at: number; usdcPerUnit: number } | null = null;
+
+/** Roughly what `amount` of the fee mint is worth in USDC micros. Only decides whether to claim; the swap quotes afresh. */
+export async function usdcValue(mint: string, amount: bigint, now = Date.now(), getQuote = quote) {
+  if (mint === config.USDC_MINT) return Number(amount);
+  if (!unitPrice || unitPrice.mint !== mint || now - unitPrice.at > 30_000) {
+    const out = Number((await getQuote(mint, config.USDC_MINT, amount)).outAmount ?? 0);
+    unitPrice = { mint, at: now, usdcPerUnit: out / Number(amount) };
+  }
+  return Math.floor(Number(amount) * unitPrice.usdcPerUnit);
+}
+
 /** True when a claim cycle is unfinished, or enough fees have built up to be worth claiming (`creatorFeeMinUsd`). */
 export async function creatorFeesDue(pool: Chain, settings: Settings) {
   if (await unfinishedCycle(pool)) return true;
   const c = await claimable(pool);
   if (!c) return false;
   if (settings.creatorFeeMinUsd <= 0) return true;
-  // Value it in USDC: a Jupiter quote, no transaction.
-  const value = c.quoteMint === config.USDC_MINT ? Number(c.amount) : Number((await quote(c.quoteMint, config.USDC_MINT, c.amount)).outAmount ?? 0);
-  return value >= micros(settings.creatorFeeMinUsd);
+  return await usdcValue(c.quoteMint, c.amount) >= micros(settings.creatorFeeMinUsd);
 }
 
 /**
