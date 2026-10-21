@@ -8,29 +8,31 @@ import { migrate } from '../server/db';
 import { fromWinner, pickExample, toCard } from '../server/showcase';
 import { packDef } from '../shared/packs';
 
-test('watch packs are on sale and settle like Pokémon packs, keyed by machine code', async () => {
+test('packs are sold and settled by machine code, so two machines can share a price', async () => {
   const s = await setup(), { wallet } = await user(s);
   const quotes = await s.orders.quotes(wallet);
-  assert.ok(quotes.some(q => q.code === 'ewatches_500'), 'the machine that pays watches is offered');
-  assert.equal(quotes.filter(q => q.priceUsd === 500).length, 3, '$500 is two card packs and a watch pack');
-  const { order } = await s.orders.create(wallet, 'ewatches_500');
-  assert.equal(order.packCode, 'ewatches_500');
+  assert.equal(quotes.filter(q => q.priceUsd === 500).length, 3, '$500 is Psychic, Gold and the watch pack');
+  const { order } = await s.orders.create(wallet, 'ewatch_500');
+  assert.equal(order.packCode, 'ewatch_500');
   await s.orders.pay(wallet, order.id, 'practice');
   const done = await settle(s, order.id);
   assert.equal(done.status, 'complete');
-  assert.match(done.card!.name, /Box & papers/);
+  assert.match(done.card!.name, /PSA/, 'the WATCH machines pay out graded cards');
   await assert.rejects(s.orders.create(wallet, 'sealed_80'), /not available here/);
   await s.db.close();
 });
 
-test('Legendary $250 and 151 & Friends are on sale; the WATCH machines sell as card packs', async () => {
+test('Legendary $250, the WATCH card packs and Watch $500 are on sale; 151 & Friends is off sale but still known', async () => {
   const s = await setup(), { wallet } = await user(s);
   const codes = (await s.orders.quotes(wallet)).map(q => q.code);
-  assert.ok(codes.includes('pokemon_250') && codes.includes('pokemon_151'));
-  assert.ok(codes.includes('ewatch_250') && codes.includes('ewatch_500'));
+  assert.ok(['pokemon_250', 'ewatch_250', 'ewatch_500', 'ewatches_500'].every(c => codes.includes(c)));
+  assert.ok(!codes.includes('pokemon_151'), 'no machine image on Collector Crypt');
+  await assert.rejects(s.orders.create(wallet, 'pokemon_151'), /not available right now/);
+  assert.equal(packDef('pokemon_151')?.priceUsd, 151, 'past orders and claims still read');
   assert.equal(packDef('ewatch_500')?.kind, 'pokemon', 'they pay out Pokémon cards, not watches');
-  const { order } = await s.orders.create(wallet, 'pokemon_151');
-  assert.deepEqual([order.priceUsd, order.totalUsd], [151, 166.1]);
+  const { order } = await s.orders.create(wallet, 'ewatches_500');
+  await s.orders.pay(wallet, order.id, 'practice');
+  assert.match((await settle(s, order.id)).card!.name, /Box & papers/, 'the watch pack pays out a watch');
   await s.db.close();
 });
 
@@ -59,11 +61,11 @@ test('when Collector Crypt says a machine is low, the order refunds at once and 
   await s.db.close();
 });
 
-test('pausing a $500 Pokémon pack leaves the $500 watch pack on sale', async () => {
+test('pausing one $500 pack leaves the other $500 pack on sale', async () => {
   const s = await setup({ pausedPacks: ['pokemon_500'] }), { wallet } = await user(s, 20_000);
   const quotes = await s.orders.quotes(wallet);
   assert.equal(quotes.find(q => q.code === 'pokemon_500')!.quote.protected, false);
-  assert.equal(quotes.find(q => q.code === 'ewatches_500')!.quote.protected, true);
+  assert.equal(quotes.find(q => q.code === 'ewatch_500')!.quote.protected, true);
   await s.db.close();
 });
 

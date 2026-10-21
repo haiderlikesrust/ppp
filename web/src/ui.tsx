@@ -61,7 +61,67 @@ export function Booster({ code, priceUsd, className = '', style }: { code?: stri
     {!loaded && <div aria-hidden="true" className="absolute inset-[12%] animate-pulse rounded-lg bg-surface" />}
     <img src={image} alt={`${p.name} $${priceUsd} pack`} referrerPolicy="no-referrer" onLoad={() => setLoaded(true)} onError={() => setBroken(true)} className={`aspect-square w-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`} />
   </div>;
+  // Collector Crypt has no picture of its watch machine, so draw one that stands beside the other machines' photos.
+  if (packDef(code)?.kind === 'watch') return <WatchMachine priceUsd={priceUsd} className={className} style={style} />;
   return <DrawnBooster p={p} priceUsd={priceUsd} className={className} style={style} />;
+}
+
+/** Dial, hands and strap colors for the watches on display: steel, blue, green, black and gold. */
+const DIALS = [['#f2f0ea', '#1b1e25', '#8d939c'], ['#1f4fa8', '#e9edf2', '#2a2f39'], ['#1c6b4c', '#e9edf2', '#c9cdd3'], ['#15171c', '#e8c46a', '#4a3a22'], ['#e8c46a', '#2a2116', '#6b4e2a']];
+
+/** A luxury watch display machine, drawn at the same square footprint as Collector Crypt's machine photos. */
+function WatchMachine({ priceUsd, className = '', style }: { priceUsd: number; className?: string; style?: CSSProperties }) {
+  const id = useId().replace(/:/g, '');
+  const watch = (x: number, y: number, i: number) => {
+    const [dial, hands, strap] = DIALS[i % DIALS.length];
+    return <g key={`${x}-${y}`}>
+      <rect x={x - 4} y={y - 15} width="8" height="30" rx="3" fill={strap} />
+      <circle cx={x} cy={y} r="9.5" fill={`url(#${id}-case)`} />
+      <circle cx={x} cy={y} r="7.4" fill={dial} />
+      <path d={`M${x} ${y}V${y - 5.2}M${x} ${y}L${x + 3.6} ${y + 1.6}`} stroke={hands} strokeWidth="1.3" strokeLinecap="round" />
+      <rect x={x + 9} y={y - 1.5} width="2.4" height="3" rx="0.8" fill="#c9cdd3" />
+    </g>;
+  };
+  return <div className={`booster-img ${className}`} style={{ '--type': '#e2b85c', ...style } as CSSProperties}>
+    <svg viewBox="0 0 240 240" className="block aspect-square w-full" role="img" aria-label={`Luxury watch machine, $${priceUsd} pack`}>
+      <defs>
+        <linearGradient id={`${id}-body`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#2a2e37" /><stop offset="1" stopColor="#101217" /></linearGradient>
+        <linearGradient id={`${id}-gold`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#f6dc93" /><stop offset=".55" stopColor="#e2b85c" /><stop offset="1" stopColor="#b8862f" /></linearGradient>
+        <linearGradient id={`${id}-glass`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2b2416" /><stop offset=".18" stopColor="#14120e" /><stop offset="1" stopColor="#0b0c0f" /></linearGradient>
+        <radialGradient id={`${id}-case`} cx=".35" cy=".3" r=".8"><stop offset="0" stopColor="#ffffff" /><stop offset=".5" stopColor="#c9cdd3" /><stop offset="1" stopColor="#7d838c" /></radialGradient>
+        <linearGradient id={`${id}-shine`} x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#fff" stopOpacity="0" /><stop offset=".5" stopColor="#fff" stopOpacity=".12" /><stop offset="1" stopColor="#fff" stopOpacity="0" /></linearGradient>
+      </defs>
+      {/* Cabinet, with a gold edge */}
+      <rect x="38" y="10" width="164" height="214" rx="15" fill={`url(#${id}-gold)`} />
+      <rect x="41" y="13" width="158" height="208" rx="12" fill={`url(#${id}-body)`} />
+      {/* Marquee */}
+      <rect x="50" y="21" width="140" height="24" rx="6" fill={`url(#${id}-gold)`} />
+      <text x="120" y="36.5" textAnchor="middle" fontFamily="Silkscreen, ui-monospace, monospace" fontSize="9" fontWeight="700" letterSpacing="1" fill="#2a2116">LUXURY WATCH</text>
+      {/* Lit display case: three shelves of watches */}
+      <rect x="50" y="52" width="104" height="114" rx="6" fill={`url(#${id}-glass)`} stroke="#3a3324" strokeWidth="1.5" />
+      <rect x="55" y="56" width="94" height="3" rx="1.5" fill="#ffe7a8" opacity=".85" />
+      {[86, 118, 150].map((y, row) => <g key={y}>
+        {[70, 102, 134].map((x, col) => watch(x, y - 9, row * 3 + col))}
+        <rect x="54" y={y + 7} width="96" height="2.5" rx="1" fill={`url(#${id}-gold)`} opacity=".9" />
+      </g>)}
+      <path d="M52 54h30L62 164H52Z" fill={`url(#${id}-shine)`} />
+      {/* Control column: screen, keypad, card reader, emblem */}
+      <rect x="159" y="52" width="31" height="114" rx="5" fill="#15181e" stroke="#2c303a" strokeWidth="1.2" />
+      <rect x="164" y="58" width="21" height="14" rx="2" fill="#1d2a24" />
+      <rect x="166" y="61" width="12" height="2" rx="1" fill="#45d483" opacity=".8" />
+      <rect x="166" y="66" width="8" height="2" rx="1" fill="#45d483" opacity=".5" />
+      {[0, 1, 2, 3].flatMap(r => [0, 1, 2].map(c => <circle key={`${r}${c}`} cx={167 + c * 7.5} cy={82 + r * 7.5} r="2.2" fill="#3a3f4a" />))}
+      <rect x="166" y="114" width="17" height="3" rx="1.5" fill="#0b0c0f" />
+      <circle cx="174.5" cy="140" r="9" fill="none" stroke={`url(#${id}-gold)`} strokeWidth="2" />
+      <path d="M174.5 140v-5M174.5 140l3.5 2" stroke="#e2b85c" strokeWidth="1.6" strokeLinecap="round" />
+      {/* Gold price plate and the opening the watch drops into */}
+      <rect x="50" y="173" width="140" height="13" rx="3" fill={`url(#${id}-gold)`} />
+      <text x="120" y="182.5" textAnchor="middle" fontFamily="Silkscreen, ui-monospace, monospace" fontSize="7.5" fontWeight="700" letterSpacing="1.2" fill="#2a2116">${priceUsd} · 1 WATCH</text>
+      <rect x="92" y="192" width="56" height="20" rx="7" fill="#0b0c0f" stroke="#e2b85c" strokeWidth="1.4" />
+      <rect x="56" y="224" width="22" height="6" rx="2" fill="#0d0f13" />
+      <rect x="162" y="224" width="22" height="6" rx="2" fill="#0d0f13" />
+    </svg>
+  </div>;
 }
 
 /** The drawn booster: crimped foil top and bottom, the type's energy in the middle. */

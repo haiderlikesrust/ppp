@@ -11,13 +11,14 @@ export const PACK_CATALOG: PackDef[] = [
   { code: 'pokemon_25', priceUsd: 25, kind: 'pokemon' },
   { code: 'pokemon_50', priceUsd: 50, kind: 'pokemon' },
   { code: 'pokemon_100', priceUsd: 100, kind: 'pokemon' },
-  { code: 'pokemon_151', priceUsd: 151, kind: 'pokemon', unlisted: true },
   { code: 'pokemon_250', priceUsd: 250, kind: 'pokemon' },
   { code: 'ewatch_250', priceUsd: 250, kind: 'pokemon' },
   { code: 'pokemon_500', priceUsd: 500, kind: 'pokemon' },
   { code: 'ewatch_500', priceUsd: 500, kind: 'pokemon' },
-  // Collector Crypt's "Watch $500": the machine that actually pays out watches.
+  // Collector Crypt's "Watch $500": the machine that actually pays out watches. It has no machine image there, so the site draws one.
   { code: 'ewatches_500', priceUsd: 500, kind: 'watch', unlisted: true },
+  // Off sale: Collector Crypt has no machine image for it. Kept so any orders on it still read.
+  { code: 'pokemon_151', priceUsd: 151, kind: 'pokemon', unlisted: true, retired: true },
 ];
 
 /** The machines on sale now. */
