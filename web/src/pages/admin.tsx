@@ -11,7 +11,7 @@ type Gas = { opsSol: number; poolSol: number; spentTodayUsd: number; opsReady: b
 type Admin = { settings: Settings; version: string; gas: Gas | null; blockers: string[]; problems: string[]; calibration: { generatedAt: string; samples: number; distributions: any[] } | null; review: any[]; delayed: any[]; jobs: any[]; audit: any[] };
 
 export function AdminPage() {
-  const { me, notify, connect, version } = useApp();
+  const { me, notify, connect, version, refresh } = useApp();
   const [data, setData] = useState<Admin | null>(null);
   const [form, setForm] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
@@ -28,7 +28,8 @@ export function AdminPage() {
   async function save() {
     if (saving) return;
     setSaving(true);
-    try { await api('/admin/settings', form, 'PATCH', { 'If-Match': data!.version }); notify('Settings saved.'); await load(); } catch (e) { notify((e as Error).message); } finally { setSaving(false); }
+    // Refreshing `me` too: a tier exception on the owner's own wallet shows right away.
+    try { await api('/admin/settings', form, 'PATCH', { 'If-Match': data!.version }); notify('Settings saved.'); await load(); await refresh(); } catch (e) { notify((e as Error).message); } finally { setSaving(false); }
   }
   async function act(path: string, body: unknown, message: string) { try { await api(path, body); notify(message); await load(false); } catch (e) { notify((e as Error).message); } }
 
@@ -81,6 +82,20 @@ export function AdminPage() {
         <button className="btn btn-outline btn-sm px-2.5" aria-label="Remove exception" onClick={() => set('walletTiers', form.walletTiers.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
       </div>)}</div>}
       <button className={`btn btn-outline btn-sm ${form.walletTiers.length ? 'mt-3' : ''}`} onClick={() => { const top = [...form.tiers].sort((a, b) => b.onsiteCoverageBps - a.onsiteCoverageBps)[0]; if (top) set('walletTiers', [...form.walletTiers, { wallet: '', tierId: top.id }]); }}><Plus size={14} />Add wallet</button>
+    </Section>
+
+    <Section title="Wallet cooldowns" sub="How long a wallet waits after opening a pack before it can open the next. The wait shows on the pack buttons. Refunded packs don't count.">
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Field label="Every wallet, minutes" hint="0 = no wait. Tier exception wallets skip this."><input className="input num" type="number" min={0} value={form.cooldown.minutes} onChange={e => set('cooldown', { ...form.cooldown, minutes: n(e.target.value) })} /></Field>
+      </div>
+      <div className="label mt-5">Custom cooldowns</div>
+      <p className="mt-1 text-xs text-muted">A wallet listed here always uses its own time, even if it has a tier exception. 0 = no wait.</p>
+      {form.cooldown.wallets.length > 0 && <div className="mt-3 grid gap-2">{form.cooldown.wallets.map((c, i) => <div key={i} className="flex flex-wrap items-center gap-2">
+        <input className="input num min-w-0 flex-1 basis-72" placeholder="Wallet address" spellCheck={false} value={c.wallet} onChange={ev => set('cooldown', { ...form.cooldown, wallets: form.cooldown.wallets.map((x, j) => j === i ? { ...x, wallet: ev.target.value.trim() } : x) })} />
+        <label className="flex items-center gap-2 text-sm text-muted"><input className="input num w-28" type="number" min={0} aria-label="Minutes" value={c.minutes} onChange={ev => set('cooldown', { ...form.cooldown, wallets: form.cooldown.wallets.map((x, j) => j === i ? { ...x, minutes: n(ev.target.value) } : x) })} />min</label>
+        <button className="btn btn-outline btn-sm px-2.5" aria-label="Remove cooldown" onClick={() => set('cooldown', { ...form.cooldown, wallets: form.cooldown.wallets.filter((_, j) => j !== i) })}><Trash2 size={14} /></button>
+      </div>)}</div>}
+      <button className="btn btn-outline btn-sm mt-3" onClick={() => set('cooldown', { ...form.cooldown, wallets: [...form.cooldown.wallets, { wallet: '', minutes: 60 }] })}><Plus size={14} />Add wallet</button>
     </Section>
 
     <Section title="Off-site claims and limits">

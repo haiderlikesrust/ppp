@@ -27,6 +27,8 @@ const MAX_FAILURES = 40;
 /** Consecutive Collector Crypt failures (about 4 minutes with backoff) before an order that never paid it is refunded. */
 const PROVIDER_FAILURES_BEFORE_REFUND = 7;
 const backoffMs = (failures: number) => Math.min(300_000, 2_000 * 2 ** Math.min(failures, 8));
+/** "45s", "12m" or "2h 5m". */
+const wait = (ms: number) => { const s = Math.max(1, Math.ceil(ms / 1000)), m = Math.ceil(s / 60); return s < 60 ? `${s}s` : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`; };
 
 /** Network trouble or a provider 5xx/429: worth retrying, not worth a human's attention yet. */
 export function isTransient(error: unknown) {
@@ -76,6 +78,20 @@ export class Orders {
   }
 
   /**
+   * When this wallet can open its next pack, or null if it can now. The wait runs from its last paid pack
+   * (refunded ones don't count): its own cooldown from Admin, else the default, which tier-exception wallets skip.
+   */
+  async nextPackAt(wallet: string, now = Date.now()) {
+    const s = this.settings.current, own = s.cooldown.wallets.find(c => c.wallet === wallet);
+    const minutes = own ? own.minutes : s.walletTiers.some(e => e.wallet === wallet) ? 0 : s.cooldown.minutes;
+    if (minutes <= 0) return null;
+    const last = (await this.db.query<{ at: string | null }>(
+      "SELECT MAX(created_at)::text AS at FROM orders WHERE wallet=$1 AND payment_signature IS NOT NULL AND status NOT IN ('refunded','expired')", [wallet])).rows[0]?.at;
+    const at = last ? Number(last) + minutes * 60_000 : 0;
+    return at > now ? at : null;
+  }
+
+  /**
    * Provider and RPC calls (pack catalog, holder snapshot, blockhash) happen first; only the DB
    * check-and-insert runs inside `run` (the coordinator's Serial queue in production), so a slow
    * call never holds up other buyers. No pool money is reserved until the buyer actually pays.
@@ -90,6 +106,8 @@ export class Orders {
     // OPS signs every step after payment; never take money it could not act on right away.
     if (!(await this.gas.opsReady())) throw Object.assign(new Error('Pack opening is paused for a minute while network fees are topped up. Nothing was charged.'), { statusCode: 503 });
     if (!(await this.packs.machines()).some(m => m.code === code)) throw new Error('That pack is not available right now.');
+    const next = await this.nextPackAt(wallet);
+    if (next) throw Object.assign(new Error(`This wallet can open its next pack in ${wait(next - Date.now())}. Nothing was charged.`), { statusCode: 429 });
     const check = await this.holders.onsiteTier(wallet);
     const first = quote(priceUsd, check.tier, s, await this.pool.free(), code);
     if (!first.protected) throw new Error(first.reason ?? check.reason ?? 'This pack cannot be protected right now.');

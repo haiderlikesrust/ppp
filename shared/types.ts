@@ -14,6 +14,11 @@ export type Settings = {
    * enough for a better tier gets that one. Off-site claims still go by holdings.
    */
   walletTiers: { wallet: string; tierId: string }[];
+  /**
+   * Minutes a wallet waits after opening a pack before it can open the next. `minutes` applies to every
+   * wallet except those with a tier exception; a wallet listed in `wallets` always uses its own time. 0 = no wait.
+   */
+  cooldown: { minutes: number; wallets: { wallet: string; minutes: number }[] };
   /** Hard cap on any single rebate, on-site or off-site. */
   maxRebateUsd: number;
   /** Hours of continuous holding checked before a pull. 0 = balance at quote and at settlement only. */
@@ -92,11 +97,11 @@ export type PoolView = {
 };
 
 export type HolderView = {
-  configured: boolean; balance: string; supply: string; ppm: number; tier: HolderTier | null;
+  /** `tier` is for packs opened here and counts tier exceptions; `heldTier` is from holdings alone, as off-site claims are judged. */
+  configured: boolean; balance: string; supply: string; ppm: number; tier: HolderTier | null; heldTier: HolderTier | null;
   activatedAt: number | null; offsiteCoverageFrom: number | null;
 };
 
-/** One pull from Collector Crypt's public feed. `pullback` marks packs opened through this site. */
 /** A pull from Collector Crypt's public feed. `mint` is the card's NFT, so anyone can look it up on-chain. */
 export type FeedPull = { id: string; mint: string; code: string; priceUsd: number; valueUsd: number; at: number; card: { name: string; image: string } | null; pullback: boolean };
 /**

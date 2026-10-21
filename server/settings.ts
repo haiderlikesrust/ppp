@@ -5,12 +5,16 @@ import { DEFAULT_SETTINGS } from '../shared/protection';
 import type { Settings } from '../shared/types';
 
 const bps = z.number().int().min(0).max(10_000);
+const walletAddress = z.string().trim().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Enter a Solana wallet address.');
+/** Up to a week between packs. */
+const cooldownMinutes = z.number().finite().min(0).max(7 * 24 * 60);
 export const settingsSchema: z.ZodType<Settings> = z.object({
   paused: z.boolean(),
   feeBps: z.number().int().min(0).max(5_000),
   poolShareBps: bps,
   tiers: z.array(z.object({ id: z.string().min(1).max(16), name: z.string().trim().min(1).max(24), minSupplyPpm: z.number().int().min(1).max(1_000_000), onsiteCoverageBps: bps, offsiteCoverageBps: bps })).min(1).max(8),
-  walletTiers: z.array(z.object({ wallet: z.string().trim().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Enter a Solana wallet address.'), tierId: z.string().min(1).max(16) })).max(100),
+  walletTiers: z.array(z.object({ wallet: walletAddress, tierId: z.string().min(1).max(16) })).max(100),
+  cooldown: z.object({ minutes: cooldownMinutes, wallets: z.array(z.object({ wallet: walletAddress, minutes: cooldownMinutes })).max(200) }),
   maxRebateUsd: z.number().finite().min(0).max(100_000),
   onsiteHoldHours: z.number().finite().min(0).max(24 * 30),
   offsiteHoldHours: z.number().finite().min(0).max(24 * 30),
@@ -61,7 +65,7 @@ export class SettingsStore {
       ...(before2 && row.data.offsite?.claimWindowHours === 24 ? { claimWindowHours: 48 } : {}),
       ...(before3 ? { perWalletDailyClaims: 0, perWalletDailyUsd: 0, perWalletWeeklyUsd: 0 } : {}),
     };
-    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, ...legacy, ...moved, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite, ...movedOffsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker }, gas: { ...DEFAULT_SETTINGS.gas, ...row.data.gas } }) : DEFAULT_SETTINGS;
+    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, ...legacy, ...moved, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite, ...movedOffsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker }, cooldown: { ...DEFAULT_SETTINGS.cooldown, ...row.data.cooldown }, gas: { ...DEFAULT_SETTINGS.gas, ...row.data.gas } }) : DEFAULT_SETTINGS;
     return this.current;
   }
   async save(settings: Settings) {

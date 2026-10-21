@@ -23,6 +23,9 @@ export function OpenPage() {
   const { me, config, connect, notify, refresh, version, bump } = useApp();
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [packsFailed, setPacksFailed] = useState(false);
+  // The wallet's cooldown: when it can open its next pack.
+  const [nextPackAt, setNextPackAt] = useState<number | null>(null);
+  const now = useNow(!!nextPackAt), waitMs = nextPackAt ? Math.max(0, nextPackAt - now) : 0;
   const [pool, setPool] = useState<PoolView | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [history, setHistory] = useState<OrderView[]>([]);
@@ -34,7 +37,7 @@ export function OpenPage() {
 
   const load = useCallback(() => {
     setPacksFailed(false);
-    api<{ packs: Pack[] }>('/packs').then(r => setPacks(r.packs)).catch(() => setPacksFailed(true));
+    api<{ packs: Pack[]; nextPackAt: number | null }>('/packs').then(r => { setPacks(r.packs); setNextPackAt(r.nextPackAt ?? null); }).catch(() => setPacksFailed(true));
     api<PoolView>('/pool').then(setPool).catch(() => {});
     api<{ items: Activity[] }>('/activity').then(r => setActivity(r.items)).catch(() => {});
     if (me.wallet) api<{ orders: OrderView[] }>('/orders').then(r => setHistory(r.orders)).catch(() => {}); else setHistory([]);
@@ -156,7 +159,7 @@ export function OpenPage() {
         const list = packs.filter(p => (packDef(p.code)?.kind ?? 'pokemon') === kind);
         return list.length ? <div key={kind} className="mb-12">
           <div className="label mb-4 flex items-center gap-2">{kind === 'pokemon' ? 'Pokémon cards' : 'Luxury watches'}<span className="h-px flex-1 bg-line" /></div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">{list.map(p => <PackTile key={p.code} pack={p} signedIn={!!me.wallet} busy={opening !== null} onOpen={() => open(p)} />)}</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">{list.map(p => <PackTile key={p.code} pack={p} signedIn={!!me.wallet} busy={opening !== null} waitMs={waitMs} onOpen={() => open(p)} />)}</div>
         </div> : null;
       })}
       <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">
@@ -289,8 +292,25 @@ function Example({ feeBps, coverageBps, tierName, illustrative }: { feeBps: numb
   </div>;
 }
 
-function PackTile({ pack, signedIn, busy, onOpen }: { pack: Pack; signedIn: boolean; busy: boolean; onOpen: () => void }) {
-  const q = pack.quote, blocked = signedIn && !q.protected;
+/** The current time, ticking every second while `active`. */
+function useNow(active: boolean) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now()); const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+/** "4:05" or "1:02:09". */
+const clock = (ms: number) => {
+  const s = Math.ceil(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), pad = (n: number) => String(n).padStart(2, '0');
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+};
+
+function PackTile({ pack, signedIn, busy, waitMs, onOpen }: { pack: Pack; signedIn: boolean; busy: boolean; waitMs: number; onOpen: () => void }) {
+  const q = pack.quote, cooling = signedIn && waitMs > 0, blocked = signedIn && (!q.protected || cooling);
   return <article className="group flex min-w-0 flex-col">
     <Booster code={pack.code} priceUsd={pack.priceUsd} />
     <div className="mt-4 flex flex-wrap items-baseline justify-between gap-x-2">
@@ -301,7 +321,7 @@ function PackTile({ pack, signedIn, busy, onOpen }: { pack: Pack; signedIn: bool
       {q.protected ? <span className="text-gain">Up to <b className="num">{money(q.maxRebateMicros / 1e6)}</b> back · {pct(q.coverageBps)}</span>
         : signedIn ? <span className="text-xs text-loss">{q.reason}</span> : <span className="text-muted">Connect to see your coverage</span>}
     </div>
-    <button className="btn btn-primary mt-3 w-full" disabled={busy || blocked} onClick={onOpen}>{signedIn ? 'Open' : 'Connect to open'}<ArrowRight size={15} /></button>
+    <button className="btn btn-primary mt-3 w-full" disabled={busy || blocked} onClick={onOpen}>{cooling ? <>Next pack in <span className="num">{clock(waitMs)}</span></> : <>{signedIn ? 'Open' : 'Connect to open'}<ArrowRight size={15} /></>}</button>
   </article>;
 }
 

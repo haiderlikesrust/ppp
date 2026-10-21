@@ -59,11 +59,40 @@ test('a tier exception lets a wallet open packs at its tier whatever it holds; a
   const done = await settle(s, order.id);
   assert.equal(done.status, 'complete');
   assert.equal(done.coverageBps, 10_000, 'and settled at it');
-  assert.equal((await s.holders.view(granted.wallet, granted.activatedAt)).tier?.id, 't3', 'the site shows the granted tier');
+  const view = await s.holders.view(granted.wallet, granted.activatedAt);
+  assert.equal(view.tier?.id, 't3', 'the site shows the granted tier for packs opened here');
+  assert.equal(view.heldTier, null, 'and the held tier for claims, which go by holdings');
   assert.equal((await s.orders.create(holder.wallet, 'pokemon_50')).order.coverageBps, 10_000, 'a Whale holder given a Shrimp exception stays a Whale');
 
   assert.throws(() => settingsSchema.parse({ ...s.settings.current, walletTiers: [{ wallet: 'not a wallet', tierId: 't3' }] }));
   assert.match(settingsProblems({ ...s.settings.current, walletTiers: [{ wallet: granted.wallet, tierId: 'gone' }] }).join(' '), /tier that no longer exists/);
+  await s.db.close();
+});
+
+test('cooldowns: wallets wait between packs; a custom time wins; tier exceptions skip the default', async () => {
+  const s = await setup(), a = await user(s, 20_000), vip = await user(s, 0), slow = await user(s, 20_000), quoter = await user(s, 20_000);
+  await s.settings.save({ ...s.settings.current, walletTiers: [{ wallet: vip.wallet, tierId: 't3' }], cooldown: { minutes: 30, wallets: [{ wallet: slow.wallet, minutes: 120 }] } });
+  const openOne = async (wallet: string) => { const { order } = await s.orders.create(wallet, 'pokemon_25'); await s.orders.pay(wallet, order.id, 'practice'); return settle(s, order.id); };
+  const back = (wallet: string, minutes: number) => s.db.query('UPDATE orders SET created_at=created_at-$2 WHERE wallet=$1', [wallet, minutes * 60_000]);
+
+  assert.equal(await s.orders.nextPackAt(a.wallet), null, 'no pack yet, no wait');
+  assert.equal((await openOne(a.wallet)).status, 'complete');
+  const next = await s.orders.nextPackAt(a.wallet);
+  assert.ok(next && next > Date.now() + 29 * 60_000 && next <= Date.now() + 30 * 60_000, 'the default 30 minutes from the last pack');
+  await assert.rejects(s.orders.create(a.wallet, 'pokemon_25'), /next pack in 30m\. Nothing was charged/);
+  await back(a.wallet, 31);
+  assert.equal(await s.orders.nextPackAt(a.wallet), null, 'free again after 30 minutes');
+
+  await openOne(vip.wallet);
+  assert.equal(await s.orders.nextPackAt(vip.wallet), null, 'a tier exception skips the default');
+  await openOne(slow.wallet);
+  await back(slow.wallet, 60);
+  assert.ok(await s.orders.nextPackAt(slow.wallet), 'its own 2 hours, not the default 30 minutes');
+  await s.db.query("UPDATE orders SET status='refunded' WHERE wallet=$1", [slow.wallet]);
+  assert.equal(await s.orders.nextPackAt(slow.wallet), null, 'a refunded pack does not count');
+
+  await s.orders.create(quoter.wallet, 'pokemon_25');
+  assert.equal(await s.orders.nextPackAt(quoter.wallet), null, 'an unpaid quote does not start a wait');
   await s.db.close();
 });
 

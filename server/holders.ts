@@ -138,8 +138,8 @@ export class Holders {
   }
 
   async view(wallet: string, activatedAt: number): Promise<HolderView> {
-    if (!this.solana.holderMint) return { configured: false, balance: '0', supply: '0', ppm: 0, tier: null, activatedAt, offsiteCoverageFrom: null };
-    const { balance, supply } = await this.recent(wallet);
-    return { configured: true, balance: balance.toString(), supply: supply.toString(), ppm: supplyPpm(balance, supply), tier: this.withException(wallet, holderTier(balance, supply, this.settings.current.tiers)), activatedAt, offsiteCoverageFrom: this.settings.current.offsiteActivationHours > 0 ? activatedAt + this.settings.current.offsiteActivationHours * HOUR : null };
+    if (!this.solana.holderMint) return { configured: false, balance: '0', supply: '0', ppm: 0, tier: null, heldTier: null, activatedAt, offsiteCoverageFrom: null };
+    const { balance, supply } = await this.recent(wallet), held = holderTier(balance, supply, this.settings.current.tiers);
+    return { configured: true, balance: balance.toString(), supply: supply.toString(), ppm: supplyPpm(balance, supply), tier: this.withException(wallet, held), heldTier: held, activatedAt, offsiteCoverageFrom: this.settings.current.offsiteActivationHours > 0 ? activatedAt + this.settings.current.offsiteActivationHours * HOUR : null };
   }
 }

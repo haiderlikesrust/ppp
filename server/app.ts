@@ -88,7 +88,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
 
   app.get('/api/packs', async req => {
     const session = await sessionWallet(db, req.cookies[COOKIE]);
-    return { packs: await s.orders.quotes(session?.wallet ?? null) };
+    return { packs: await s.orders.quotes(session?.wallet ?? null), nextPackAt: session ? await s.orders.nextPackAt(session.wallet) : null };
   });
   app.post('/api/orders', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);

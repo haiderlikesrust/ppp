@@ -20,15 +20,17 @@ function progress(ppm: number, tiers: HolderTier[]) {
 export function CoverageLadder({ mode = 'onsite' }: { mode?: 'onsite' | 'offsite' }) {
   const { me, config, connect } = useApp();
   const tiers: HolderTier[] = [...(config?.settings?.tiers ?? [])].sort((a, b) => a.minSupplyPpm - b.minSupplyPpm);
-  const h = me.holder, current = h?.tier?.id, ppm = h?.ppm ?? 0;
-  const next = tiers.find(t => t.minSupplyPpm > ppm);
-  const filled = me.wallet && h?.configured ? progress(ppm, tiers) : 0;
+  // Packs opened here can be covered above what the wallet holds; off-site claims always go by holdings.
+  const h = me.holder, tier = mode === 'onsite' ? h?.tier : h?.heldTier ?? null, current = tier?.id, ppm = h?.ppm ?? 0;
+  const lifted = !!tier && ppm < tier.minSupplyPpm, level = lifted ? tier.minSupplyPpm : ppm;
+  const next = tiers.find(t => t.minSupplyPpm > level);
+  const filled = me.wallet && h?.configured ? progress(level, tiers) : 0;
   return <div className="card p-5 sm:p-6">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <div className="label">{mode === 'onsite' ? 'Your coverage · packs opened here' : 'Your coverage · packs opened elsewhere'}</div>
-        <div className="pixel mt-1.5 text-xl">{!me.wallet ? 'Connect to see your tier' : h?.tier ? h.tier.name : h?.configured === false ? 'Token not launched yet' : 'No tier yet'}</div>
-        {me.wallet && h?.configured && <p className="mt-1 text-sm text-muted">You hold <span className="num text-ink">{share(ppm)}</span> of supply{next ? <>. <span className="num text-ink">{share(next.minSupplyPpm - ppm)}</span> more reaches {next.name}.</> : '. That is the top tier.'}</p>}
+        <div className="pixel mt-1.5 text-xl">{!me.wallet ? 'Connect to see your tier' : tier ? tier.name : h?.configured === false ? 'Token not launched yet' : 'No tier yet'}</div>
+        {me.wallet && h?.configured && !lifted && <p className="mt-1 text-sm text-muted">You hold <span className="num text-ink">{share(ppm)}</span> of supply{next ? <>. <span className="num text-ink">{share(next.minSupplyPpm - ppm)}</span> more reaches {next.name}.</> : '. That is the top tier.'}</p>}
       </div>
       {!me.wallet && <button className="btn btn-primary btn-sm" onClick={connect}>Connect wallet</button>}
     </div>
@@ -38,7 +40,7 @@ export function CoverageLadder({ mode = 'onsite' }: { mode?: 'onsite' | 'offsite
       <div className="absolute left-0 top-[7px] h-1.5 rounded-[2px] bg-volt transition-[width] duration-700" style={{ width: `${filled * 100}%` }} role="progressbar" aria-label="Your tier progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(filled * 100)} />
       <div className="relative grid" style={{ gridTemplateColumns: `repeat(${tiers.length || 1}, minmax(0, 1fr))` }}>
         {tiers.map(t => {
-          const reached = !!me.wallet && ppm >= t.minSupplyPpm, here = t.id === current;
+          const reached = !!me.wallet && level >= t.minSupplyPpm, here = t.id === current;
           return <div key={t.id} className="flex min-w-0 flex-col items-center text-center">
             <span className={`size-5 rotate-45 border-2 ${here ? 'border-volt bg-volt shadow-[0_0_0_4px_rgb(255_210_63/.18)]' : reached ? 'border-volt bg-volt' : 'border-faint bg-bg'}`} />
             <div className={`pixel mt-3 max-w-full truncate text-[11px] sm:text-sm ${here ? 'text-volt' : ''}`}>{t.name}</div>
