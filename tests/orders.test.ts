@@ -199,3 +199,23 @@ test('the loss-ratio breaker pauses a pack price that keeps losing money', async
   await assert.rejects(s.orders.create(wallet, 'pokemon_25'), /paused/);
   await s.db.close();
 });
+
+test('the breaker counts fee-free packs at the listed fee, so a fee waiver alone does not pause a pack', async () => {
+  const s = await setup({ breaker: { lossRatioBps: 1_000_000, minPacks: 2, windowDays: 7 } }), vip = await user(s, 0);
+  await s.settings.save({ ...s.settings.current, walletTiers: [{ wallet: vip.wallet, tierId: 't3' }] });
+  for (let i = 0; i < 3; i++) {
+    const { order } = await s.orders.create(vip.wallet, 'pokemon_100');
+    await s.orders.pay(vip.wallet, order.id, 'practice');
+    assert.equal((await settle(s, order.id)).feeUsd, 0);
+  }
+  const rebate = (usd: number) => s.db.query("UPDATE orders SET data = data || jsonb_build_object('rebateMicros', $1::bigint)", [micros(usd)]);
+  await rebate(20);
+  await s.settings.save({ ...s.settings.current, breaker: { lossRatioBps: 100_000, minPacks: 2, windowDays: 7 } });
+  // At the listed 10% fee, each $100 pack would have put $5 into the pool: $20 back on each is 400%.
+  const stats = (await s.pool.byPack()).find(r => r.code === 'pokemon_100')!;
+  assert.deepEqual([stats.feesMicros, stats.lossRatioBps, stats.breakerRatioBps], [0, Infinity, 40_000], 'the real ratio stays real');
+  assert.equal(await s.pool.checkBreaker('pokemon_100'), false, '400% is under the 1,000% limit');
+  await rebate(60);
+  assert.equal(await s.pool.checkBreaker('pokemon_100'), true, '1,200% at the listed fee still pauses it');
+  await s.db.close();
+});

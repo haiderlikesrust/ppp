@@ -62,25 +62,35 @@ export class Pool {
     return { count: row.n, nextAt: row.oldest ? Number(row.oldest) + DAY : null };
   }
 
-  /** Trailing per-pack economics for completed on-site orders. Orders from before pack codes were Pokémon packs. */
+  /**
+   * Trailing per-pack economics for completed on-site orders. Orders from before pack codes were Pokémon packs.
+   * `lossRatioBps` is against the fees the pool really got. `breakerRatioBps` counts packs sold without a fee
+   * (tier exception wallets) at the listed fee, so a fee waiver alone doesn't read as an infinite loss.
+   */
   async byPack(days = this.settings.current.breaker.windowDays) {
-    const rows = (await this.db.query<{ code: string; price_micros: string; packs: number; fees: string; rebates: string }>(
-      `SELECT COALESCE(data->>'packCode', 'pokemon_' || (price_micros / 1000000)::text) AS code, MIN(price_micros)::text AS price_micros, COUNT(*)::int AS packs, COALESCE(SUM((data->>'poolShareMicros')::bigint),0)::text AS fees, COALESCE(SUM((data->>'rebateMicros')::bigint),0)::text AS rebates
-       FROM orders WHERE status='complete' AND updated_at >= $1 GROUP BY 1 ORDER BY MIN(price_micros), 1`, [Date.now() - days * DAY])).rows;
+    const s = this.settings.current;
+    const rows = (await this.db.query<{ code: string; price_micros: string; packs: number; fees: string; listed_fees: string; rebates: string }>(
+      `SELECT COALESCE(data->>'packCode', 'pokemon_' || (price_micros / 1000000)::text) AS code, MIN(price_micros)::text AS price_micros, COUNT(*)::int AS packs,
+         COALESCE(SUM((data->>'poolShareMicros')::bigint),0)::text AS fees,
+         COALESCE(SUM(CASE WHEN fee_micros = 0 THEN price_micros * $2 / 10000 * COALESCE((data->>'poolShareBps')::bigint, $3) / 10000 ELSE COALESCE((data->>'poolShareMicros')::bigint, 0) END),0)::text AS listed_fees,
+         COALESCE(SUM((data->>'rebateMicros')::bigint),0)::text AS rebates
+       FROM orders WHERE status='complete' AND updated_at >= $1 GROUP BY 1 ORDER BY MIN(price_micros), 1`, [Date.now() - days * DAY, s.feeBps, s.poolShareBps])).rows;
+    const ratio = (fees: number, rebates: number) => fees > 0 ? Math.floor(rebates * 10_000 / fees) : rebates > 0 ? Infinity : null;
     return rows.map(r => {
       const fees = Number(r.fees), rebates = Number(r.rebates);
-      return { code: r.code, priceUsd: usd(Number(r.price_micros)), packs: r.packs, feesMicros: fees, rebatesMicros: rebates, lossRatioBps: fees > 0 ? Math.floor(rebates * 10_000 / fees) : rebates > 0 ? Infinity : null };
+      return { code: r.code, priceUsd: usd(Number(r.price_micros)), packs: r.packs, feesMicros: fees, rebatesMicros: rebates, lossRatioBps: ratio(fees, rebates), breakerRatioBps: ratio(Number(r.listed_fees), rebates) };
     });
   }
 
-  /** Pauses a pack whose trailing rebates exceed the configured share of its pool fee income. */
+  /** Pauses a pack whose trailing rebates exceed the configured share of its pool fee income, waived fees counted at the listed fee. */
   async checkBreaker(code: string) {
     const s = this.settings.current;
     if (s.pausedPacks.includes(code)) return false;
     const stats = (await this.byPack()).find(r => r.code === code);
-    if (!stats || stats.packs < s.breaker.minPacks || stats.lossRatioBps === null || stats.lossRatioBps <= s.breaker.lossRatioBps) return false;
+    if (!stats || stats.packs < s.breaker.minPacks || stats.breakerRatioBps === null || stats.breakerRatioBps <= s.breaker.lossRatioBps) return false;
     await this.settings.save({ ...s, pausedPacks: [...s.pausedPacks, code] });
-    await audit(this.db, 'breaker-tripped', { ...stats, lossRatioBps: Number.isFinite(stats.lossRatioBps) ? stats.lossRatioBps : 'infinite' });
+    const finite = (n: number | null) => n !== null && !Number.isFinite(n) ? 'infinite' : n;
+    await audit(this.db, 'breaker-tripped', { ...stats, lossRatioBps: finite(stats.lossRatioBps), breakerRatioBps: finite(stats.breakerRatioBps) });
     return true;
   }
 
