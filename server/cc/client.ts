@@ -1,4 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
+import { PACK_CATALOG } from '../../shared/packs';
 
 export const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 export type Card = { mint: string; name: string; image: string | null; insuredValueUsd: number | null; rarity: string | null; transferSignature: string | null };
@@ -23,10 +24,11 @@ export class CollectorCrypt {
     }
     return response.json();
   }
+  /** Collector Crypt's public machines, plus the unlisted ones our catalog sells on purpose (see `unlisted`). */
   async machines(): Promise<any[]> {
     const result = await this.request('/machines');
     if (!Array.isArray(result.machines)) throw new Error('Unexpected machine catalog.');
-    return result.machines.filter((m: any) => m.public);
+    return result.machines.filter((m: any) => m.public || PACK_CATALOG.some(p => p.unlisted && p.code === m.code));
   }
   async generatePack(playerAddress: string, packType: string, priceUsdc: number) {
     new PublicKey(playerAddress);

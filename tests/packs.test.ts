@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, settle, user } from './helpers';
-import { ApiError, machineUnavailable } from '../server/cc/client';
+import { ApiError, CollectorCrypt, machineUnavailable } from '../server/cc/client';
 import { openDatabase } from '../server/db';
 import { SettingsStore } from '../server/settings';
 import { migrate } from '../server/db';
@@ -12,7 +12,7 @@ test('watch packs are on sale and settle like Pokémon packs, keyed by machine c
   const s = await setup(), { wallet } = await user(s);
   const quotes = await s.orders.quotes(wallet);
   assert.ok(quotes.some(q => q.code === 'ewatches_500'), 'the machine that pays watches is offered');
-  assert.equal(quotes.filter(q => q.priceUsd === 500).length, 2, '$500 is both a Pokémon and a watch pack');
+  assert.equal(quotes.filter(q => q.priceUsd === 500).length, 3, '$500 is two card packs and a watch pack');
   const { order } = await s.orders.create(wallet, 'ewatches_500');
   assert.equal(order.packCode, 'ewatches_500');
   await s.orders.pay(wallet, order.id, 'practice');
@@ -23,16 +23,26 @@ test('watch packs are on sale and settle like Pokémon packs, keyed by machine c
   await s.db.close();
 });
 
-test('Legendary $250 and 151 & Friends are on sale; the old watch machines are retired but still known', async () => {
+test('Legendary $250 and 151 & Friends are on sale; the WATCH machines sell as card packs', async () => {
   const s = await setup(), { wallet } = await user(s);
   const codes = (await s.orders.quotes(wallet)).map(q => q.code);
   assert.ok(codes.includes('pokemon_250') && codes.includes('pokemon_151'));
-  assert.ok(!codes.includes('ewatch_250') && !codes.includes('ewatch_500'), 'they paid Pokémon cards, not watches');
-  await assert.rejects(s.orders.create(wallet, 'ewatch_250'), /not available right now/);
-  assert.equal(packDef('ewatch_500')?.priceUsd, 500, 'past orders and claims still read');
+  assert.ok(codes.includes('ewatch_250') && codes.includes('ewatch_500'));
+  assert.equal(packDef('ewatch_500')?.kind, 'pokemon', 'they pay out Pokémon cards, not watches');
   const { order } = await s.orders.create(wallet, 'pokemon_151');
   assert.deepEqual([order.priceUsd, order.totalUsd], [151, 166.1]);
   await s.db.close();
+});
+
+test('hidden Collector Crypt machines are sold only when our catalog marks them unlisted', async () => {
+  const machines = [
+    { code: 'pokemon_25', price: 25, public: true, contains: 1 },
+    { code: 'ewatches_500', price: 500, public: false, contains: 1 },
+    { code: 'pokemon_151', price: 151, public: false, contains: 1 },
+    { code: 'eprimate_100', price: 100, public: false, contains: 1 },
+  ];
+  const cc = new CollectorCrypt('', (async () => new Response(JSON.stringify({ machines }))) as typeof fetch);
+  assert.deepEqual((await cc.machines()).map(m => m.code), ['pokemon_25', 'ewatches_500', 'pokemon_151'], 'other hidden machines stay out');
 });
 
 test('when Collector Crypt says a machine is low, the order refunds at once and nothing retries', async () => {

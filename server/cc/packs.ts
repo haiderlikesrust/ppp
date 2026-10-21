@@ -15,7 +15,7 @@ export class CollectorCryptPacks implements PackProvider {
   private paused = new Map<string, number>();
 
   /**
-   * Single-card Pokémon machines that are public, open, and in stock (grailshot's filter).
+   * Machines we sell that are public (or deliberately unlisted), open, and in stock (grailshot's filter).
    * Cached for 30s and shared by concurrent callers, so page views do not fan out to Collector
    * Crypt. A pack that sells out inside that window is caught at purchase time and refunded.
    */

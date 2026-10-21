@@ -29,8 +29,8 @@ export const PACKS: Record<string, PackStyle> = {
   pokemon_151: { name: 'Fairy', type: 'fairy', color: '#ff7eb6', item: 'graded card' },
   pokemon_250: { name: 'Dragon', type: 'dragon', color: '#7b6cf6', item: 'graded card' },
   pokemon_500: { name: 'Psychic', type: 'psychic', color: '#c77dff', item: 'graded card' },
-  ewatches_500: { name: 'Steel', type: 'steel', color: '#9fb0c4', item: 'luxury watch' },
-  // Retired: sold as watch packs, but they paid out graded cards.
+  ewatches_500: { name: 'Watch', type: 'steel', color: '#d9dee6', item: 'luxury watch' },
+  // Collector Crypt calls these watch machines, but they pay out graded cards.
   ewatch_250: { name: 'Steel', type: 'steel', color: '#9fb0c4', item: 'graded card' },
   ewatch_500: { name: 'Gold', type: 'steel', color: '#e2b85c', item: 'graded card' },
 };

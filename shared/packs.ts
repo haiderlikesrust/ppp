@@ -1,20 +1,23 @@
 /** Collector Crypt machines we sell, by their machine code. A code is what identifies a pack: $500 is both a Pokémon and a watch pack. */
 export type PackKind = 'pokemon' | 'watch';
-/** `retired`: no longer sold, but still known so past orders, claims and receipts read correctly. */
-export type PackDef = { code: string; priceUsd: number; kind: PackKind; retired?: boolean };
+/**
+ * `retired`: no longer sold, but still known so past orders, claims and receipts read correctly.
+ * `unlisted`: Collector Crypt keeps the machine off its public menu (`public: false`) but it is open and selling; sold here anyway.
+ */
+export type PackDef = { code: string; priceUsd: number; kind: PackKind; retired?: boolean; unlisted?: boolean };
 
+/** In price order. Collector Crypt's "WATCH 250" and "WATCH 500" pay out graded Pokémon cards, so they sell as card packs. */
 export const PACK_CATALOG: PackDef[] = [
   { code: 'pokemon_25', priceUsd: 25, kind: 'pokemon' },
   { code: 'pokemon_50', priceUsd: 50, kind: 'pokemon' },
   { code: 'pokemon_100', priceUsd: 100, kind: 'pokemon' },
-  { code: 'pokemon_151', priceUsd: 151, kind: 'pokemon' },
+  { code: 'pokemon_151', priceUsd: 151, kind: 'pokemon', unlisted: true },
   { code: 'pokemon_250', priceUsd: 250, kind: 'pokemon' },
+  { code: 'ewatch_250', priceUsd: 250, kind: 'pokemon' },
   { code: 'pokemon_500', priceUsd: 500, kind: 'pokemon' },
+  { code: 'ewatch_500', priceUsd: 500, kind: 'pokemon' },
   // Collector Crypt's "Watch $500": the machine that actually pays out watches.
-  { code: 'ewatches_500', priceUsd: 500, kind: 'watch' },
-  // Listed as watch machines on Collector Crypt, but their pulls are all graded Pokémon cards.
-  { code: 'ewatch_250', priceUsd: 250, kind: 'pokemon', retired: true },
-  { code: 'ewatch_500', priceUsd: 500, kind: 'pokemon', retired: true },
+  { code: 'ewatches_500', priceUsd: 500, kind: 'watch', unlisted: true },
 ];
 
 /** The machines on sale now. */
