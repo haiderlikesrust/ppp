@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setup } from './helpers';
+import { setup, settle, user } from './helpers';
+import { feeClaimAllowed } from '../server/services';
 import { PriceImpactTooHigh, swap } from '../server/swap';
 import { DEFAULT_SETTINGS } from '../shared/protection';
 import type { Chain } from '../server/chain';
@@ -35,6 +36,23 @@ test('the every-second fee check reuses a price for 30 seconds instead of quotin
   await usdcValue(mint, 3_000n, t + 31_000, getQuote);
   assert.deepEqual(quotes, [1_000n, 3_000n], 'quoted again after 30 seconds');
   assert.equal(await usdcValue(config.USDC_MINT, 7n, t, getQuote), 7, 'USDC needs no quote');
+});
+
+test('creator-fee claims wait their turn behind packs being opened', async () => {
+  const t = 1_000_000_000;
+  assert.equal(feeClaimAllowed(t, 0, false), true);
+  assert.equal(feeClaimAllowed(t, t - 30_000, false), false, 'at most once a minute');
+  assert.equal(feeClaimAllowed(t, t - 61_000, true), false, 'not while a pack is mid-opening');
+  assert.equal(feeClaimAllowed(t, t - 11 * 60_000, true), true, 'but at least every 10 minutes');
+  const s = await setup(), { wallet } = await user(s);
+  assert.equal(await s.orders.opening(), false);
+  const { order } = await s.orders.create(wallet, 'pokemon_25');
+  assert.equal(await s.orders.opening(), false, 'an unpaid order is not opening yet');
+  await s.orders.pay(wallet, order.id, 'practice');
+  assert.equal(await s.orders.opening(), true);
+  await settle(s, order.id);
+  assert.equal(await s.orders.opening(), false);
+  await s.db.close();
 });
 
 test('a fee sale is refused before signing when it would move the price too much', async () => {
