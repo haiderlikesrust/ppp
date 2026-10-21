@@ -93,6 +93,8 @@ export type HolderView = {
 
 /** One pull from Collector Crypt's public feed. `pullback` marks packs opened through this site. */
 export type FeedPull = { id: string; code: string; priceUsd: number; valueUsd: number; at: number; card: { name: string; image: string } | null; pullback: boolean };
+/** A pack opened on Pullback: the card that came out and the rebate actually sent back. */
+export type SitePull = { id: string; code: string; priceUsd: number; valueUsd: number; rebateUsd: number; at: number; card: { name: string; image: string | null } | null };
 
 /** What a pack's recent pulls were worth, over its latest `n` pulls on Collector Crypt. */
 export type PackStats = {

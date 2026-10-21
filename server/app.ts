@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { ShowcaseSource } from './showcase';
-import { leaderboard } from './leaderboard';
+import { leaderboard, sitePulls } from './leaderboard';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -135,6 +135,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
   // Collector Crypt's pack images and one real card, for the site's artwork.
   app.get('/api/showcase', async () => showcase.get());
   app.get('/api/pulls/recent', async () => ({ items: s.feed.recent(24) }));
+  app.get('/api/pulls/pullback', async () => ({ items: await sitePulls(db, 24) }));
   app.get('/api/stats', async () => s.feed.stats());
   app.get('/api/leaderboard', async req => {
     const { week } = z.object({ week: z.enum(['current', 'last']).default('current') }).parse(req.query);

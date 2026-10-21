@@ -73,7 +73,7 @@ function DrawnBooster({ p, priceUsd, className = '', style }: { p: PackStyle; pr
 
 const TYPE_COLORS = ['#45d483', '#4aa3ff', '#ff8a4c', '#c77dff', '#ffd23f', '#ff5c8a', '#5ee0d0', '#a3a8b5'];
 const hash = (text: string) => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-const typeColor = (name: string) => TYPE_COLORS[hash(name) % TYPE_COLORS.length];
+export const typeColor = (name: string) => TYPE_COLORS[hash(name) % TYPE_COLORS.length];
 /** Mixes a hex color toward white (t > 0) or black (t < 0). */
 function shade(hex: string, t: number) {
   const n = parseInt(hex.slice(1), 16), target = t > 0 ? 255 : 0, k = Math.abs(t);

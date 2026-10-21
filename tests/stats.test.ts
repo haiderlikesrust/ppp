@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, settle, user } from './helpers';
 import { HIT_MULTIPLE, PullFeed, SAMPLE_PER_PACK } from '../server/pull-feed';
-import { leaderboard, weekStart, WEEK } from '../server/leaderboard';
+import { leaderboard, sitePulls, weekStart, WEEK } from '../server/leaderboard';
 import { createApp } from '../server/app';
 import { distribution, micros } from '../shared/protection';
 
@@ -133,6 +133,33 @@ test('leaderboards rank this week’s hits, packs opened and rebates, and mark t
   assert.equal(last.end, board.start);
   assert.equal(last.packs[0].you, false);
   await s.db.close();
+});
+
+test('Just pulled lists packs finished on Pullback, newest first, with the rebate sent and a short card name', async () => {
+  const s = await setup(), a = await user(s);
+  const open = async (code: string, valueUsd: number, rebateUsd: number, name?: string) => {
+    const { order } = await s.orders.create(a.wallet, code);
+    await s.orders.pay(a.wallet, order.id, 'practice');
+    assert.equal((await settle(s, order.id)).status, 'complete');
+    await s.db.query("UPDATE orders SET data = data || jsonb_build_object('valueMicros', $2::bigint, 'rebateMicros', $3::bigint) WHERE id=$1", [order.id, micros(valueUsd), micros(rebateUsd)]);
+    if (name) await s.db.query("UPDATE orders SET data = jsonb_set(data, '{card,name}', to_jsonb($2::text)) WHERE id=$1", [order.id, name]);
+    return order.id;
+  };
+  const first = await open('pokemon_25', 10, 7.5, '2019 #69 Full Art/Moltres GX PSA 10 Hidden Fates Pokemon');
+  const second = await open('pokemon_100', 400, 0);
+  await s.db.query('UPDATE orders SET created_at=created_at-1000 WHERE id=$1', [first]);
+  const unfinished = (await s.orders.create(a.wallet, 'pokemon_50')).order.id;
+
+  const pulls = await sitePulls(s.db);
+  assert.deepEqual(pulls.map(p => p.id), [second, first], 'newest first; an order still waiting for payment is left out');
+  assert.equal(pulls.some(p => p.id === unfinished), false);
+  assert.deepEqual([pulls[1].code, pulls[1].priceUsd, pulls[1].valueUsd, pulls[1].rebateUsd], ['pokemon_25', 25, 10, 7.5]);
+  assert.equal(pulls[1].card?.name, 'Moltres GX', 'a Collector Crypt title is cut to the card');
+  assert.equal(pulls[0].rebateUsd, 0);
+
+  const { app } = await createApp({ services: s, timers: false, logger: false });
+  assert.deepEqual((await app.inject({ url: '/api/pulls/pullback' })).json().items.map((p: { id: string }) => p.id), [second, first]);
+  await app.close();
 });
 
 test('the stats, recent pulls and leaderboard routes answer for anyone', async () => {

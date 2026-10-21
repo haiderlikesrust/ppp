@@ -20,7 +20,7 @@ const FINAL = ['complete', 'refunded', 'expired', 'review'];
 const IN_PROGRESS = ['paying', 'paid', 'buying', 'delivering', 'settling', 'refunding'];
 
 export function OpenPage() {
-  const { me, config, connect, notify, refresh, version } = useApp();
+  const { me, config, connect, notify, refresh, version, bump } = useApp();
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [packsFailed, setPacksFailed] = useState(false);
   const [pool, setPool] = useState<PoolView | null>(null);
@@ -54,7 +54,8 @@ export function OpenPage() {
         const next = await api<OrderView>(`/orders/${id}`);
         if (following.current !== id) return;
         setOrder(next);
-        if (FINAL.includes(next.status)) { following.current = null; load(); refresh().catch(() => {}); return; }
+        // Bumping reloads this page's lists, the Just pulled strip and the vault balance.
+        if (FINAL.includes(next.status)) { following.current = null; bump(); refresh().catch(() => {}); return; }
       } catch (e) {
         if (following.current !== id) return;
         const status = (e as { status?: number }).status;

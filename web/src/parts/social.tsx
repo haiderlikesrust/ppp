@@ -1,4 +1,4 @@
-export const X_HANDLE = 'pullprotection';
+export const X_HANDLE = 'pullbackcards';
 export const X_URL = `https://x.com/${X_HANDLE}`;
 
 /** The X wordmark; lucide only ships the old bird. */

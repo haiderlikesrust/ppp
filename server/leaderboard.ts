@@ -1,6 +1,7 @@
 import { usd } from '../shared/protection';
-import type { Leaderboard } from '../shared/types';
+import type { Leaderboard, SitePull } from '../shared/types';
 import type { Database } from './db';
+import { cardTitle } from './showcase';
 
 export const WEEK = 7 * 86_400_000;
 const TOP = 10;
@@ -49,4 +50,19 @@ export async function leaderboard(db: Database, week: 'current' | 'last', viewer
   const rebates = [...onsite, ...offsite].sort((a, b) => b.rebateUsd - a.rebateUsd || a.at - b.at).slice(0, TOP);
 
   return { week, start, end, hits, packs, rebates };
+}
+
+/** The newest packs opened on Pullback, with the card and the rebate it sent. Collector Crypt titles are cut to the card's name. */
+export async function sitePulls(db: Database, limit = 24): Promise<SitePull[]> {
+  const rows = (await db.query<{ id: string; price_micros: string; data: any; created_at: string }>(
+    `SELECT id,price_micros::text,data,created_at::text FROM orders
+     WHERE status='complete' AND data ? 'valueMicros' ORDER BY created_at DESC LIMIT $1`, [limit])).rows;
+  return rows.map(r => {
+    const name = r.data.card?.name ? String(r.data.card.name) : null;
+    return {
+      id: r.id, code: packCode(r.data, r.price_micros), priceUsd: usd(Number(r.price_micros)), valueUsd: usd(Number(r.data.valueMicros)),
+      rebateUsd: usd(Number(r.data.rebateMicros ?? 0)), at: Number(r.created_at),
+      card: name ? { name: name.includes(' · ') ? name : cardTitle(name), image: r.data.card.image ?? null } : null,
+    };
+  });
 }

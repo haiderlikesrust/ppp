@@ -95,6 +95,8 @@ export async function migrate(db: Database) {
     // Collector Crypt's public pull feed, for pack stats: the latest pulls of each machine, plus the card of big hits.
     `CREATE TABLE IF NOT EXISTS cc_pulls (id TEXT PRIMARY KEY, code TEXT NOT NULL, value_cents INTEGER NOT NULL, pulled_at BIGINT NOT NULL, card JSONB)`,
     `CREATE INDEX IF NOT EXISTS cc_pulls_recent ON cc_pulls(code, pulled_at DESC)`,
+    // Finished orders by time, for the homepage's Just pulled strip and the weekly boards.
+    `CREATE INDEX IF NOT EXISTS orders_done ON orders(created_at DESC) WHERE status='complete'`,
   ];
   for (const statement of statements) await db.query(statement);
 }
