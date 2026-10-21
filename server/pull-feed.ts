@@ -80,7 +80,7 @@ export class PullFeed {
         code: def.code, priceUsd: def.priceUsd, n: rows.length, since: rows.length ? Number(rows[rows.length - 1].pulled_at) : null,
         medianUsd: d ? cents(d.medianValueRatio) : 0, meanUsd: d ? cents(d.meanValueRatio) : 0, p10Usd: d ? cents(d.p10) : 0, p90Usd: d ? cents(d.p90) : 0,
         hitRate: d?.hitRate ?? 0, avgRebateUsd,
-        best: best ? { id: best.id, code: def.code, priceUsd: def.priceUsd, valueUsd: best.value_cents / 100, at: Number(best.pulled_at), card: best.card, pullback: false } : null,
+        best: best ? { id: best.id, mint: best.id.split(':')[0], code: def.code, priceUsd: def.priceUsd, valueUsd: best.value_cents / 100, at: Number(best.pulled_at), card: best.card, pullback: false } : null,
       });
     }
     const value = { packs, updatedAt: this.polledAt };
@@ -109,5 +109,5 @@ export function parsePull(w: any, def: PackDef, opsAddress: string | null): Feed
   const at = Date.parse(w?.created_at), value = Number(w?.insuredValue), mint = w?.nft_address;
   if (w?.pack_type !== def.code || typeof mint !== 'string' || !Number.isFinite(at) || !Number.isFinite(value) || value <= 0) return null;
   const card = toCard(fromWinner(w));
-  return { id: `${mint}:${at}`, code: def.code, priceUsd: def.priceUsd, valueUsd: value, at, card: card ? { name: card.name, image: card.image } : null, pullback: !!opsAddress && w?.winner === opsAddress };
+  return { id: `${mint}:${at}`, mint, code: def.code, priceUsd: def.priceUsd, valueUsd: value, at, card: card ? { name: card.name, image: card.image } : null, pullback: !!opsAddress && w?.winner === opsAddress };
 }

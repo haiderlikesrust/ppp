@@ -158,11 +158,12 @@ export function DocsPage() {
       </Entry>
 
       <Entry n={9} id="stats" title="Stats and leaderboards">
-        <p>The <Link href="/stats">Stats page</Link> shows what Collector Crypt packs really pay out. We read Collector Crypt's public feed of recent pulls every 2 minutes and keep each machine's latest 5,000 pulls.</p>
+        <p>The <Link href="/stats">Stats page</Link> shows every pack opened on Pullback and what Collector Crypt packs really pay out. We read Collector Crypt's public feed of recent pulls every 2 minutes and keep each machine's latest 5,000 pulls.</p>
         <ul>
+          <li><b>Receipts:</b> every pack opened on Pullback with its transactions on Solscan: the buyer's payment, our purchase of the pack on Collector Crypt, the card sent to the buyer, the rebate, and the sale if the card was sold back. Each card also links to its NFT.</li>
           <li><b>Pack stats:</b> the median card, the hit rate (cards worth at least the pack), the spread of values, and what each tier gets back on average per pack opened here. They use the same math that sets our fees.</li>
           <li><b>Leaderboards:</b> this week's biggest hit, most packs opened and biggest rebate on Pullback. They reset every Monday at 00:00 UTC, and last week's stay up for a week.</li>
-          <li><b>Recent pulls:</b> the newest pulls with the real card photo, and what your tier would get back on a bad one.</li>
+          <li><b>Recent pulls:</b> the newest pulls on Collector Crypt with the real card photo, and what your tier would get back on a bad one. Tap a card to see its NFT on Solscan.</li>
         </ul>
         <p>Card values are Collector Crypt's insured values at the moment of each pull. Pullback doesn't set the odds and never sees a pack before it opens.</p>
       </Entry>

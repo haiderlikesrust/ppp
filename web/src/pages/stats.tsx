@@ -1,20 +1,21 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Coins, Package, Trophy, type LucideIcon } from 'lucide-react';
-import type { HolderTier, Leaderboard, PackStats, StatsView } from '../../../shared/types';
+import { ArrowUpRight, Coins, Package, ShieldCheck, Trophy, type LucideIcon } from 'lucide-react';
+import type { HolderTier, Leaderboard, PackStats, SitePull, StatsView } from '../../../shared/types';
 import { packDef } from '../../../shared/packs';
-import { ago, api, money } from '../api';
+import { ago, api, money, short, solscan } from '../api';
 import { Link, useApp } from '../app';
 import { Booster, SectionTitle, packStyle } from '../ui';
-import { PullCard, useRebateTier, useRecentPulls } from '../parts/pulls';
+import { PullCard, useRebateTier, useRecentPulls, useSitePulls } from '../parts/pulls';
 
-/** Pack stats from Collector Crypt's own pull feed, this week's Pullback leaderboards, and the live pull feed. */
+/** On-chain receipts for packs opened here, this week's Pullback leaderboards, and stats from Collector Crypt's own pull feed. */
 export function StatsPage() {
   return <>
     <section className="enter py-12 md:py-16">
       <span className="tag bg-gain-soft text-gain"><i className="live-dot" />Live from Collector Crypt</span>
       <h1 className="pixel mt-5 text-4xl leading-none sm:text-6xl">PULL STATS</h1>
-      <p className="mt-5 max-w-xl text-lg text-muted">What Collector Crypt packs really pay out, read from thousands of recent pulls, and who is on top at Pullback this week.</p>
+      <p className="mt-5 max-w-xl text-lg text-muted">Every pack opened on Pullback with its on-chain receipts, who is on top this week, and what Collector Crypt packs really pay out.</p>
     </section>
+    <Receipts />
     <Leaderboards />
     <PackStatsSection />
     <RecentSection />
@@ -26,6 +27,53 @@ export function StatsPage() {
 function until(end: number) {
   const ms = Math.max(0, end - Date.now()), d = Math.floor(ms / 86_400_000), h = Math.floor(ms % 86_400_000 / 3_600_000), m = Math.floor(ms % 3_600_000 / 60_000);
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+
+/** What each transaction of a Pullback pack is, in the order they happen. */
+const TXS = [
+  ['payment', 'Paid', "The buyer's USDC payment"],
+  ['pack', 'Pack bought', 'Pullback buying the pack on Collector Crypt'],
+  ['card', 'Card sent', "The card sent to the buyer's wallet"],
+  ['rebate', 'Rebate', 'The rebate paid from the vault'],
+  ['sale', 'Sold', 'The card sold back to Collector Crypt'],
+] as const;
+
+/** Every pack opened on Pullback, each with the transactions behind it, so anyone can check it on Solscan. */
+function Receipts() {
+  const pulls = useSitePulls(), { config } = useApp();
+  const [all, setAll] = useState(false);
+  const wallets = ([['Treasury', config?.opsAddress], ['Vault', config?.poolAddress]] as const).filter(([, address]) => address);
+  return <section className="pb-14">
+    <SectionTitle title="Receipts" sub="Every pack opened on Pullback, with the transactions behind it. Check any of them on Solscan." action={<span className="tag bg-gain-soft text-gain"><ShieldCheck size={12} />On-chain</span>} />
+    {pulls === null ? <div className="card grid gap-3 p-5">{[0, 1, 2].map(i => <div key={i} className="h-14 animate-pulse rounded bg-raised" />)}</div>
+      : pulls.length ? <div className="card overflow-hidden">
+        {pulls.slice(0, all ? pulls.length : 6).map(p => <Receipt key={p.id} pull={p} />)}
+        {pulls.length > 6 && <button className="pixel flex h-11 w-full items-center justify-center border-t border-line text-sm text-muted hover:bg-raised hover:text-ink" onClick={() => setAll(v => !v)}>{all ? 'Show less' : `Show all ${pulls.length}`}</button>}
+      </div>
+      : <div className="card px-5 py-10 text-center text-sm text-muted">No packs opened here yet. <Link href="/" className="text-volt hover:underline">Open the first one</Link>.</div>}
+    {wallets.length > 0 && <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+      <span>Packs are bought from our treasury wallet. Rebates are paid from the vault.</span>
+      {wallets.map(([label, address]) => <a key={label} href={solscan('account', address!)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-volt">{label} <span className="num">{short(address!)}</span><ArrowUpRight size={12} /></a>)}
+    </p>}
+  </section>;
+}
+
+function Receipt({ pull: p }: { pull: SitePull }) {
+  const s = packStyle(p.code, p.priceUsd), [title] = (p.card?.name ?? 'Graded card').split(' · ');
+  return <div className="flex gap-3 border-b border-line px-4 py-3 last:border-0 sm:px-5">
+    {p.card?.image ? <img src={p.card.image} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-14 w-[34px] shrink-0 rounded-sm object-cover" /> : <i className="h-14 w-[34px] shrink-0 rounded-sm" style={{ background: s.color }} />}
+    <div className="min-w-0 flex-1">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="truncate text-sm" title={p.card?.name}>{title}</span>
+        {p.rebateUsd > 0 ? <span className="pixel num shrink-0 text-gain">+{money(p.rebateUsd)}</span> : p.valueUsd >= p.priceUsd ? <span className="tag shrink-0 bg-volt text-night">Hit</span> : null}
+      </div>
+      <div className="num text-xs text-muted">{p.wallet} · {money(p.priceUsd)} {s.name} pack · worth {money(p.valueUsd)} · {ago(p.at)}</div>
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+        {TXS.filter(([key]) => p.txs[key]).map(([key, label, about]) => <a key={key} href={solscan('tx', p.txs[key]!)} target="_blank" rel="noreferrer" title={about} className="inline-flex items-center gap-0.5 text-muted hover:text-volt">{key === 'sale' && p.soldUsd !== null ? `${label} ${money(p.soldUsd)}` : label}<ArrowUpRight size={12} /></a>)}
+        {p.mint && <a href={solscan('token', p.mint)} target="_blank" rel="noreferrer" title="The card's NFT" className="inline-flex items-center gap-0.5 text-muted hover:text-volt">Card NFT<ArrowUpRight size={12} /></a>}
+      </div>
+    </div>
+  </div>;
 }
 
 function Leaderboards() {

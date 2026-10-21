@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { ArrowUpRight } from 'lucide-react';
 import type { FeedPull, HolderTier, SitePull } from '../../../shared/types';
-import { ago, api, money } from '../api';
+import { ago, api, money, solscan } from '../api';
 import { Link, useApp } from '../app';
 import { CardArt, SectionTitle, WatchArt, isWatch, packStyle, typeColor } from '../ui';
 
@@ -56,13 +57,18 @@ export function PullCard({ pull, className = '' }: { pull: FeedPull | SitePull; 
   const s = packStyle(pull.code, pull.priceUsd), up = pull.valueUsd >= pull.priceUsd, paid = 'rebateUsd' in pull ? pull.rebateUsd : null;
   const change = Math.round((pull.valueUsd / pull.priceUsd - 1) * 100), back = paid ?? rebateFor(pull.priceUsd, pull.valueUsd, tier, maxRebateUsd);
   const [title, set] = (pull.card?.name ?? 'Graded card').split(' · ');
+  // The proof: the card arriving in the buyer's wallet for a Pullback pack, the card's NFT for a Collector Crypt pull.
+  const proof = 'txs' in pull ? (pull.txs.card ? solscan('tx', pull.txs.card) : pull.mint ? solscan('token', pull.mint) : null) : solscan('token', pull.mint);
+  const art = <>
+    {pull.card?.image ? <img src={pull.card.image} alt={pull.card.name} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full scale-[1.04] object-cover" />
+      : pull.card && <div className="grid h-full place-items-center p-1.5">{isWatch(pull.code) ? <WatchArt name={title} color={typeColor(title)} /> : <CardArt name={title} set={set} color={typeColor(title)} />}</div>}
+    <span className="tag absolute left-1.5 top-1.5 bg-night/85 text-ink"><i className="size-2" style={{ background: s.color }} />{money(pull.priceUsd)}</span>
+    {'pullback' in pull && pull.pullback && <span className="tag absolute bottom-1.5 left-1.5 bg-volt text-night">Pullback</span>}
+    {proof && <span className="absolute bottom-1.5 right-1.5 grid size-6 place-items-center rounded bg-night/85 text-muted group-hover:text-volt" aria-hidden="true"><ArrowUpRight size={13} /></span>}
+  </>;
+  const box = 'group relative block aspect-[3/5] overflow-hidden rounded-lg border border-line bg-raised';
   return <figure className={`min-w-0 ${className}`}>
-    <div className="relative aspect-[3/5] overflow-hidden rounded-lg border border-line bg-raised">
-      {pull.card?.image ? <img src={pull.card.image} alt={pull.card.name} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full scale-[1.04] object-cover" />
-        : pull.card && <div className="grid h-full place-items-center p-1.5">{isWatch(pull.code) ? <WatchArt name={title} color={typeColor(title)} /> : <CardArt name={title} set={set} color={typeColor(title)} />}</div>}
-      <span className="tag absolute left-1.5 top-1.5 bg-night/85 text-ink"><i className="size-2" style={{ background: s.color }} />{money(pull.priceUsd)}</span>
-      {'pullback' in pull && pull.pullback && <span className="tag absolute bottom-1.5 left-1.5 bg-volt text-night">Pullback</span>}
-    </div>
+    {proof ? <a href={proof} target="_blank" rel="noreferrer" title="Check it on Solscan" aria-label={`${title} on Solscan`} className={`${box} hover:border-volt`}>{art}</a> : <div className={box}>{art}</div>}
     <figcaption className="mt-2 min-w-0">
       <div className="truncate text-xs" title={pull.card?.name}>{title}</div>
       <div className="mt-0.5 flex items-baseline justify-between gap-2">

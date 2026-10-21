@@ -92,9 +92,18 @@ export type HolderView = {
 };
 
 /** One pull from Collector Crypt's public feed. `pullback` marks packs opened through this site. */
-export type FeedPull = { id: string; code: string; priceUsd: number; valueUsd: number; at: number; card: { name: string; image: string } | null; pullback: boolean };
-/** A pack opened on Pullback: the card that came out and the rebate actually sent back. */
-export type SitePull = { id: string; code: string; priceUsd: number; valueUsd: number; rebateUsd: number; at: number; card: { name: string; image: string | null } | null };
+/** A pull from Collector Crypt's public feed. `mint` is the card's NFT, so anyone can look it up on-chain. */
+export type FeedPull = { id: string; mint: string; code: string; priceUsd: number; valueUsd: number; at: number; card: { name: string; image: string } | null; pullback: boolean };
+/**
+ * A pack opened on Pullback: the card that came out, the rebate actually sent back, and the transactions
+ * behind it (the buyer's payment, our purchase on Collector Crypt, the card sent to the buyer, the rebate,
+ * and a quick sale if there was one). The wallet is shortened.
+ */
+export type SitePull = {
+  id: string; code: string; priceUsd: number; valueUsd: number; rebateUsd: number; at: number; wallet: string; mint: string | null;
+  card: { name: string; image: string | null } | null; soldUsd: number | null;
+  txs: { payment: string | null; pack: string | null; card: string | null; rebate: string | null; sale: string | null };
+};
 
 /** What a pack's recent pulls were worth, over its latest `n` pulls on Collector Crypt. */
 export type PackStats = {

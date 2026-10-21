@@ -156,6 +156,11 @@ test('Just pulled lists packs finished on Pullback, newest first, with the rebat
   assert.deepEqual([pulls[1].code, pulls[1].priceUsd, pulls[1].valueUsd, pulls[1].rebateUsd], ['pokemon_25', 25, 10, 7.5]);
   assert.equal(pulls[1].card?.name, 'Moltres GX', 'a Collector Crypt title is cut to the card');
   assert.equal(pulls[0].rebateUsd, 0);
+  const row = (await s.db.query<{ payment_signature: string; data: any }>('SELECT payment_signature,data FROM orders WHERE id=$1', [first])).rows[0];
+  assert.deepEqual(pulls[1].txs, { payment: row.payment_signature, pack: row.data.packSignature, card: row.data.nftSignature, rebate: row.data.rebateSignature ?? null, sale: null }, 'every transaction behind the pack, for Solscan');
+  assert.ok(pulls[1].txs.payment && pulls[1].txs.pack && pulls[1].txs.card);
+  assert.equal(pulls[1].mint, row.data.card.mint);
+  assert.match(pulls[1].wallet, /^\w{4}…\w{4}$/, 'wallets are shortened');
 
   const { app } = await createApp({ services: s, timers: false, logger: false });
   assert.deepEqual((await app.inject({ url: '/api/pulls/pullback' })).json().items.map((p: { id: string }) => p.id), [second, first]);
@@ -170,7 +175,8 @@ test('the stats, recent pulls and leaderboard routes answer for anyone', async (
   const stats = (await app.inject({ url: '/api/stats' })).json();
   assert.equal(stats.packs.length, 6);
   assert.equal(stats.packs.find((p: { code: string }) => p.code === 'pokemon_25').best.valueUsd, 60);
-  assert.equal((await app.inject({ url: '/api/pulls/recent' })).json().items[0].valueUsd, 60);
+  const recent = (await app.inject({ url: '/api/pulls/recent' })).json().items[0];
+  assert.deepEqual([recent.valueUsd, recent.mint], [60, `mint-pokemon_25-${now}-60`], 'each pull carries its NFT, to look it up on-chain');
   assert.equal((await app.inject({ url: '/api/leaderboard' })).json().week, 'current');
   assert.equal((await app.inject({ url: '/api/leaderboard?week=last' })).json().week, 'last');
   assert.equal((await app.inject({ url: '/api/leaderboard?week=forever' })).statusCode, 400);

@@ -52,17 +52,22 @@ export async function leaderboard(db: Database, week: 'current' | 'last', viewer
   return { week, start, end, hits, packs, rebates };
 }
 
-/** The newest packs opened on Pullback, with the card and the rebate it sent. Collector Crypt titles are cut to the card's name. */
+/**
+ * The newest packs opened on Pullback, with the card, the rebate it sent and every transaction behind it,
+ * so anyone can check them on-chain. Collector Crypt titles are cut to the card's name.
+ */
 export async function sitePulls(db: Database, limit = 24): Promise<SitePull[]> {
-  const rows = (await db.query<{ id: string; price_micros: string; data: any; created_at: string }>(
-    `SELECT id,price_micros::text,data,created_at::text FROM orders
+  const rows = (await db.query<{ id: string; wallet: string; price_micros: string; payment_signature: string | null; data: any; created_at: string }>(
+    `SELECT id,wallet,price_micros::text,payment_signature,data,created_at::text FROM orders
      WHERE status='complete' AND data ? 'valueMicros' ORDER BY created_at DESC LIMIT $1`, [limit])).rows;
   return rows.map(r => {
-    const name = r.data.card?.name ? String(r.data.card.name) : null;
+    const d = r.data, name = d.card?.name ? String(d.card.name) : null;
     return {
-      id: r.id, code: packCode(r.data, r.price_micros), priceUsd: usd(Number(r.price_micros)), valueUsd: usd(Number(r.data.valueMicros)),
-      rebateUsd: usd(Number(r.data.rebateMicros ?? 0)), at: Number(r.created_at),
-      card: name ? { name: name.includes(' · ') ? name : cardTitle(name), image: r.data.card.image ?? null } : null,
+      id: r.id, code: packCode(d, r.price_micros), priceUsd: usd(Number(r.price_micros)), valueUsd: usd(Number(d.valueMicros)),
+      rebateUsd: usd(Number(d.rebateMicros ?? 0)), at: Number(r.created_at), wallet: short(r.wallet), mint: d.card?.mint ?? null,
+      card: name ? { name: name.includes(' · ') ? name : cardTitle(name), image: d.card.image ?? null } : null,
+      soldUsd: d.sale ? usd(Number(d.sale.amountMicros)) : null,
+      txs: { payment: r.payment_signature, pack: d.packSignature ?? null, card: d.nftSignature ?? null, rebate: d.rebateSignature ?? null, sale: d.sale?.signature ?? null },
     };
   });
 }

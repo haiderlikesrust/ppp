@@ -15,7 +15,7 @@ import { ContractAddress } from './parts/contract';
 import { XLink } from './parts/social';
 
 export type Me = { wallet: string | null; owner?: boolean; activatedAt?: number; holder?: HolderView | null };
-export type AppConfig = { mode: 'practice' | 'mainnet' | 'read-only'; mint: string | null; poolAddress: string | null; settings: any };
+export type AppConfig = { mode: 'practice' | 'mainnet' | 'read-only'; mint: string | null; poolAddress: string | null; opsAddress: string | null; settings: any };
 type Ctx = { me: Me; config: AppConfig | null; refresh: () => Promise<void>; connect: () => void; notify: (message: string) => void; version: number; bump: () => void };
 const AppContext = createContext<Ctx>(null as any);
 export const useApp = () => useContext(AppContext);
