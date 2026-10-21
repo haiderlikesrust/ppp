@@ -17,6 +17,8 @@ import { checkSaleTransaction } from './sale';
 export type Runner = <T>(fn: () => Promise<T>) => Promise<T>;
 const direct: Runner = fn => fn();
 const PAYMENT_WINDOW_MS = 120_000;
+/** Most packs one wallet approval can open. */
+export const MAX_PER_OPEN = 5;
 // Transient failures back off up to 5 minutes, so ~40 attempts ride out a couple of hours of
 // provider or RPC trouble before an order is handed to the owner for review.
 /** Enough SOL for the payment's fee while the wallet stays rent-exempt. */
@@ -40,6 +42,8 @@ const OPEN: OrderStatus[] = ['awaiting_payment', 'paying', 'paid', 'buying', 'de
 
 type OrderData = {
   payment: BuiltPayment; quote: Quote; poolShareBps: number; quotedAt: number; expiresAt: number;
+  /** Set on orders opened together (one wallet approval): which group, and this pack's place in it. */
+  batch?: { id: string; index: number; count: number };
   /** Collector Crypt machine code. Orders from before codes existed are Pokémon packs (see packCode). */
   packCode?: string;
   /** Quick sell: the offer the buyer is signing, then the completed sale. */
@@ -88,8 +92,7 @@ export class Orders {
    * (refunded ones don't count): its own cooldown from Admin, else the default, which tier-exception wallets skip.
    */
   async nextPackAt(wallet: string, now = Date.now()) {
-    const s = this.settings.current, own = s.cooldown.wallets.find(c => c.wallet === wallet);
-    const minutes = own ? own.minutes : s.walletTiers.some(e => e.wallet === wallet) ? 0 : s.cooldown.minutes;
+    const minutes = this.cooldownMinutes(wallet);
     if (minutes <= 0) return null;
     const last = (await this.db.query<{ at: string | null }>(
       "SELECT MAX(created_at)::text AS at FROM orders WHERE wallet=$1 AND payment_signature IS NOT NULL AND status NOT IN ('refunded','expired')", [wallet])).rows[0]?.at;
@@ -97,12 +100,28 @@ export class Orders {
     return at > now ? at : null;
   }
 
+  private cooldownMinutes(wallet: string) {
+    const s = this.settings.current, own = s.cooldown.wallets.find(c => c.wallet === wallet);
+    return own ? own.minutes : s.walletTiers.some(e => e.wallet === wallet) ? 0 : s.cooldown.minutes;
+  }
+
+  /** Most packs the wallet can open in one go: one at a time while a cooldown applies to it. */
+  maxPerOpen(wallet: string) { return this.cooldownMinutes(wallet) > 0 ? 1 : MAX_PER_OPEN; }
+
+  async create(wallet: string, code: string, run: Runner = direct) {
+    const { orders, transactions } = await this.createMany(wallet, code, 1, run);
+    return { order: orders[0], transaction: transactions[0] };
+  }
+
   /**
+   * Opens `count` packs of one machine: one ordinary order per pack, each with its own payment, so every
+   * pack keeps its own receipt, rebate and refund. The wallet signs all the payments in one approval.
    * Provider and RPC calls (pack catalog, holder snapshot, blockhash) happen first; only the DB
    * check-and-insert runs inside `run` (the coordinator's Serial queue in production), so a slow
    * call never holds up other buyers. No pool money is reserved until the buyer actually pays.
    */
-  async create(wallet: string, code: string, run: Runner = direct) {
+  async createMany(wallet: string, code: string, count: number, run: Runner = direct) {
+    if (!Number.isInteger(count) || count < 1 || count > MAX_PER_OPEN) throw new Error(`Open between 1 and ${MAX_PER_OPEN} packs at a time.`);
     const def = packDef(code);
     if (!def) throw new Error('That pack is not available here.');
     const priceUsd = def.priceUsd;
@@ -114,16 +133,20 @@ export class Orders {
     if (!(await this.packs.machines()).some(m => m.code === code)) throw new Error('That pack is not available right now.');
     const next = await this.nextPackAt(wallet);
     if (next) throw Object.assign(new Error(`This wallet can open its next pack in ${wait(next - Date.now())}. Nothing was charged.`), { statusCode: 429 });
+    if (count > this.maxPerOpen(wallet)) throw new Error('This wallet opens one pack at a time.');
     const check = await this.holders.onsiteTier(wallet);
-    const first = quote(priceUsd, check.tier, s, await this.pool.free(), code);
+    const free = await this.pool.free(), first = quote(priceUsd, check.tier, s, free, code);
     if (!first.protected) throw new Error(first.reason ?? check.reason ?? 'This pack cannot be protected right now.');
+    // Every pack reserves its largest rebate when paid; say up front how many the pool can take.
+    const fits = first.maxRebateMicros > 0 ? Math.floor(free / first.maxRebateMicros) : count;
+    if (fits < count) throw new Error(`The protection pool can cover ${fits} of these packs right now. Try ${fits === 1 ? 'one' : fits}.`);
     if (!(await this.gas.opsUsdcReady())) throw Object.assign(new Error('Payments are being set up. Please try again in a minute. Nothing was charged.'), { statusCode: 503 });
     // Catch an unpayable order here, with a clear reason, instead of as a failed simulation after signing.
-    const funds = await this.solana.walletFunds(wallet), dollars = (m: bigint | number) => `$${usd(Number(m)).toFixed(2)}`;
-    if (!funds.usdcAccount || funds.usdcMicros < BigInt(first.totalMicros)) throw new Error(`This pack costs ${dollars(first.totalMicros)} in USDC and this wallet has ${dollars(funds.usdcMicros)}. Add USDC to this wallet and try again.`);
+    const funds = await this.solana.walletFunds(wallet), dollars = (m: bigint | number) => `$${usd(Number(m)).toFixed(2)}`, total = BigInt(first.totalMicros) * BigInt(count);
+    if (!funds.usdcAccount || funds.usdcMicros < total) throw new Error(`${count > 1 ? `These ${count} packs cost` : 'This pack costs'} ${dollars(total)} in USDC and this wallet has ${dollars(funds.usdcMicros)}. Add USDC to this wallet and try again.`);
     if (funds.lamports < BUYER_MIN_LAMPORTS) throw new Error('This wallet needs a little SOL (0.002 is plenty) to pay the Solana network fee.');
-    const id = randomUUID();
-    const payment = await this.solana.buildUserPayment(wallet, first.totalMicros, `pp-${id}`);
+    const ids = Array.from({ length: count }, () => randomUUID()), batch = count > 1 ? randomUUID() : null;
+    const payments = await Promise.all(ids.map(id => this.solana.buildUserPayment(wallet, first.totalMicros, `pp-${id}`)));
     return run(async () => {
       // A cancelled unpaid order no longer blocks a new one; it still settles if a payment lands before it expires.
       const waiting = (await this.db.query<Row>("SELECT * FROM orders WHERE wallet=$1 AND status IN ('awaiting_payment','paying') AND NOT COALESCE((data->>'cancelled')::boolean, FALSE)", [wallet])).rows[0];
@@ -132,10 +155,12 @@ export class Orders {
       if (!q.protected) throw new Error(q.reason ?? 'This pack cannot be protected right now.');
       if (q.totalMicros !== first.totalMicros || q.coverageBps !== first.coverageBps) throw new Error('The price or coverage just changed. Please try again.');
       const now = Date.now();
-      const data: OrderData = { packCode: code, payment, quote: q, poolShareBps: this.settings.current.poolShareBps, quotedAt: now, expiresAt: now + PAYMENT_WINDOW_MS };
-      await this.db.query('INSERT INTO orders(id,wallet,status,price_micros,fee_micros,coverage_bps,max_rebate_micros,data,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)',
-        [id, wallet, 'awaiting_payment', q.priceMicros, q.feeMicros, q.coverageBps, q.maxRebateMicros, JSON.stringify(data), now]);
-      return { order: await this.get(id, wallet), transaction: payment.transaction };
+      for (const [index, id] of ids.entries()) {
+        const data: OrderData = { packCode: code, payment: payments[index], quote: q, poolShareBps: this.settings.current.poolShareBps, quotedAt: now, expiresAt: now + PAYMENT_WINDOW_MS, ...(batch ? { batch: { id: batch, index, count } } : {}) };
+        await this.db.query('INSERT INTO orders(id,wallet,status,price_micros,fee_micros,coverage_bps,max_rebate_micros,data,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)',
+          [id, wallet, 'awaiting_payment', q.priceMicros, q.feeMicros, q.coverageBps, q.maxRebateMicros, JSON.stringify(data), now]);
+      }
+      return { orders: await Promise.all(ids.map(id => this.get(id, wallet))), transactions: payments.map(p => p.transaction) };
     });
   }
 

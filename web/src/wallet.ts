@@ -70,15 +70,37 @@ export async function ensureSigner(address: string) {
   throw Object.assign(new Error('Reconnect the wallet you signed in with to sign the payment.'), { reconnect: true });
 }
 
-/** Asks the connected wallet to sign (not send) the payment; the server checks and broadcasts it. */
-export async function signPayment(transactionBase64: string) {
+const fromBase64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const toBase64 = (bytes: Uint8Array) => { let binary = ''; for (const b of bytes) binary += String.fromCharCode(b); return btoa(binary); };
+
+function signer() {
   if (!connected) throw new Error('Reconnect your wallet to sign the payment.');
   const feature = connected.wallet.features['solana:signTransaction'] as any;
   if (!feature) throw new Error('This wallet cannot sign transactions. Try Phantom or Solflare.');
-  const bytes = Uint8Array.from(atob(transactionBase64), c => c.charCodeAt(0));
-  const [result] = await feature.signTransaction({ account: connected.account, transaction: bytes, chain: 'solana:mainnet' });
-  let binary = ''; for (const b of result.signedTransaction as Uint8Array) binary += String.fromCharCode(b);
-  return btoa(binary);
+  return { feature, account: connected.account };
+}
+
+/** Asks the connected wallet to sign (not send) the payment; the server checks and broadcasts it. */
+export async function signPayment(transactionBase64: string) {
+  const { feature, account } = signer();
+  const [result] = await feature.signTransaction({ account, transaction: fromBase64(transactionBase64), chain: 'solana:mainnet' });
+  return toBase64(result.signedTransaction);
+}
+
+/**
+ * Signs several payments in one wallet approval (Wallet Standard takes them all in one call). A wallet
+ * that can't sign several at once is asked for each in turn; a rejection is never asked again.
+ */
+export async function signPayments(transactionsBase64: string[]) {
+  if (transactionsBase64.length === 1) return [await signPayment(transactionsBase64[0])];
+  const { feature, account } = signer();
+  let results: { signedTransaction: Uint8Array }[] | null = null;
+  try { results = await feature.signTransaction(...transactionsBase64.map(t => ({ account, transaction: fromBase64(t), chain: 'solana:mainnet' }))); }
+  catch (e) { if ((e as { code?: number }).code === 4001 || /reject|denied|cancel/i.test((e as Error).message)) throw e; }
+  if (results?.length === transactionsBase64.length) return results.map(r => toBase64(r.signedTransaction));
+  const signed: string[] = [];
+  for (const t of transactionsBase64) signed.push(await signPayment(t));
+  return signed;
 }
 
 export const hasSigner = () => !!connected;

@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import { ShowcaseSource } from './showcase';
 import { leaderboard, sitePulls } from './leaderboard';
+import { MAX_PER_OPEN } from './orders';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -88,14 +89,16 @@ export async function createApp(options: { services?: Services; timers?: boolean
 
   app.get('/api/packs', async req => {
     const session = await sessionWallet(db, req.cookies[COOKIE]);
-    return { packs: await s.orders.quotes(session?.wallet ?? null), nextPackAt: session ? await s.orders.nextPackAt(session.wallet) : null };
+    return { packs: await s.orders.quotes(session?.wallet ?? null), nextPackAt: session ? await s.orders.nextPackAt(session.wallet) : null, maxPerOpen: session ? s.orders.maxPerOpen(session.wallet) : MAX_PER_OPEN };
   });
   app.post('/api/orders', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);
     // `priceUsd` alone is from older pages, which only offered Pokémon packs.
-    const body = z.object({ code: z.string().min(1).max(40).optional(), priceUsd: z.number().int().positive().optional() }).refine(b => b.code || b.priceUsd, 'Choose a pack.').parse(req.body);
+    const body = z.object({ code: z.string().min(1).max(40).optional(), priceUsd: z.number().int().positive().optional(), count: z.number().int().min(1).max(MAX_PER_OPEN).optional() }).refine(b => b.code || b.priceUsd, 'Choose a pack.').parse(req.body);
+    const code = body.code ?? `pokemon_${body.priceUsd}`;
     // Slow provider and RPC calls run outside the queue; only the DB check-and-insert waits in it.
-    return s.orders.create(session.wallet, body.code ?? `pokemon_${body.priceUsd}`, fn => serial.run(fn));
+    // Several packs come back as lists; one pack keeps the single-order shape older pages expect.
+    return body.count && body.count > 1 ? s.orders.createMany(session.wallet, code, body.count, fn => serial.run(fn)) : s.orders.create(session.wallet, code, fn => serial.run(fn));
   });
   app.post('/api/orders/:id/pay', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req);

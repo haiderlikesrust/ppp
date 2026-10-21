@@ -3,7 +3,7 @@ import { ArrowDown, ArrowRight, ArrowUpRight, Check, Plus } from 'lucide-react';
 import type { OrderView, PoolView, Quote } from '../../../shared/types';
 import { ago, api, friendly, money, pct, solscan } from '../api';
 import { Link, useApp } from '../app';
-import { ensureSigner, hasSigner, signPayment } from '../wallet';
+import { ensureSigner, hasSigner, signPayment, signPayments } from '../wallet';
 import { CoverageLadder } from '../parts/holder';
 import { ContractAddress } from '../parts/contract';
 import { PackOpening } from '../parts/opening';
@@ -26,6 +26,12 @@ export function OpenPage() {
   // The wallet's cooldown: when it can open its next pack.
   const [nextPackAt, setNextPackAt] = useState<number | null>(null);
   const now = useNow(!!nextPackAt), waitMs = nextPackAt ? Math.max(0, nextPackAt - now) : 0;
+  // Packs per open (1, 3 or 5), capped by what the server allows this wallet.
+  const [qty, setQty] = useState(1), [maxPerOpen, setMaxPerOpen] = useState(5), count = Math.min(qty, maxPerOpen);
+  // Packs opened together are revealed one after another, then summed up.
+  const [batch, setBatch] = useState<Batch | null>(null), batchRef = useRef<Batch | null>(null);
+  const [summary, setSummary] = useState<BatchSummary | null>(null);
+  const toBatch = (b: Batch | null) => { batchRef.current = b; setBatch(b); };
   const [pool, setPool] = useState<PoolView | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [history, setHistory] = useState<OrderView[]>([]);
@@ -37,7 +43,7 @@ export function OpenPage() {
 
   const load = useCallback(() => {
     setPacksFailed(false);
-    api<{ packs: Pack[]; nextPackAt: number | null }>('/packs').then(r => { setPacks(r.packs); setNextPackAt(r.nextPackAt ?? null); }).catch(() => setPacksFailed(true));
+    api<{ packs: Pack[]; nextPackAt: number | null; maxPerOpen?: number }>('/packs').then(r => { setPacks(r.packs); setNextPackAt(r.nextPackAt ?? null); setMaxPerOpen(r.maxPerOpen ?? 1); }).catch(() => setPacksFailed(true));
     api<PoolView>('/pool').then(setPool).catch(() => {});
     api<{ items: Activity[] }>('/activity').then(r => setActivity(r.items)).catch(() => {});
     if (me.wallet) api<{ orders: OrderView[] }>('/orders').then(r => setHistory(r.orders)).catch(() => {}); else setHistory([]);
@@ -58,7 +64,13 @@ export function OpenPage() {
         if (following.current !== id) return;
         setOrder(next);
         // Bumping reloads this page's lists, the Just pulled strip and the vault balance.
-        if (FINAL.includes(next.status)) { following.current = null; bump(); refresh().catch(() => {}); return; }
+        if (FINAL.includes(next.status)) {
+          following.current = null; bump(); refresh().catch(() => {});
+          // The last pack of a batch: add the whole batch up.
+          const b = batchRef.current;
+          if (b && b.index === b.ids.length - 1) Promise.all(b.ids.map(o => api<OrderView>(`/orders/${o}`))).then(all => { if (batchRef.current === b) setSummary(sum(all)); }).catch(() => {});
+          return;
+        }
       } catch (e) {
         if (following.current !== id) return;
         const status = (e as { status?: number }).status;
@@ -69,12 +81,13 @@ export function OpenPage() {
     poll.current = setTimeout(tick, 500);
   }
 
-  async function open(pack: Pack) {
+  /** Opens `count` packs of one machine: one wallet approval for all the payments, then the reveals one by one. */
+  async function open(pack: Pack, count = 1) {
     if (!me.wallet) return connect();
     if (inFlight.current) return;
     inFlight.current = true; aborted.current = false;
-    setOpening(pack); setOrder(null);
-    let unpaid: string | null = null;
+    setOpening(pack); setOrder(null); toBatch(null); setSummary(null);
+    let unpaid: string[] = [];
     try {
       const practice = config?.mode === 'practice' && !hasSigner();
       // Make sure the signing wallet is ready (and is the signed-in one) before an order is created.
@@ -83,29 +96,49 @@ export function OpenPage() {
         catch (e) { notify((e as Error).message); if ((e as { reconnect?: boolean }).reconnect) connect(); setOpening(null); return; }
       }
       if (aborted.current) return;
-      const { order: created, transaction } = await api<{ order: OrderView; transaction: string }>('/orders', { code: pack.code });
-      unpaid = created.id;
+      const created = count > 1
+        ? await api<{ orders: OrderView[]; transactions: string[] }>('/orders', { code: pack.code, count })
+        : await api<{ order: OrderView; transaction: string }>('/orders', { code: pack.code }).then(r => ({ orders: [r.order], transactions: [r.transaction] }));
+      unpaid = created.orders.map(o => o.id);
       if (aborted.current) return;
-      setOrder(created);
-      const signed = practice ? 'practice' : await signPayment(transaction);
+      setOrder(created.orders[0]);
+      const signed = practice ? created.orders.map(() => 'practice') : count > 1 ? await signPayments(created.transactions) : [await signPayment(created.transactions[0])];
       // Closed while the wallet prompt was open: don't send a payment nobody is watching.
       if (aborted.current) return;
-      try { setOrder(await api<OrderView>(`/orders/${created.id}/pay`, { signed })); }
-      catch (e) {
-        // A dropped connection can hide a payment that was sent: check before calling it a failure.
-        const check = await api<OrderView>(`/orders/${created.id}`).catch(() => null);
-        if (check && check.status !== 'awaiting_payment') { unpaid = null; setOrder(check); follow(created.id); return; }
-        throw e;
+      // Pay in order; if one is refused (say the pool filled up), the rest are released, not charged.
+      const paid: string[] = []; let refused: Error | null = null;
+      for (const [i, o] of created.orders.entries()) {
+        try { const view = await api<OrderView>(`/orders/${o.id}/pay`, { signed: signed[i] }); if (!paid.length) setOrder(view); }
+        catch (e) {
+          // A dropped connection can hide a payment that was sent: check before calling it a failure.
+          const check = await api<OrderView>(`/orders/${o.id}`).catch(() => null);
+          if (!check || check.status === 'awaiting_payment') { refused = e as Error; break; }
+          if (!paid.length) setOrder(check);
+        }
+        paid.push(o.id); unpaid = unpaid.filter(id => id !== o.id);
       }
-      unpaid = null;
-      follow(created.id);
+      if (!paid.length) throw refused ?? new Error('The payment did not go through. Nothing was charged.');
+      if (refused) notify(`Opened ${paid.length} of ${count}. ${friendly(refused)} Nothing was charged for the rest.`);
+      if (paid.length > 1) toBatch({ ids: paid, index: 0 });
+      follow(paid[0]);
     } catch (e) {
       if (!aborted.current) { notify(friendly(e as Error)); setOpening(null); setOrder(null); load(); }
     } finally {
-      // Release an unpaid order so the buyer can try again straight away.
-      if (unpaid) await api(`/orders/${unpaid}/cancel`, {}).catch(() => {});
+      // Release unpaid orders so the buyer can try again straight away.
+      for (const id of unpaid) await api(`/orders/${id}/cancel`, {}).catch(() => {});
       inFlight.current = false;
     }
+  }
+
+  /** Moves the reveal on to the next pack of the batch. It has been opening in the background meanwhile. */
+  async function nextInBatch() {
+    const b = batchRef.current;
+    if (!b || b.index >= b.ids.length - 1) return;
+    const nb = { ids: b.ids, index: b.index + 1 }, id = nb.ids[nb.index];
+    const view = await api<OrderView>(`/orders/${id}`).catch(() => null);
+    toBatch(nb);
+    if (view) setOrder(view);
+    follow(id);
   }
 
   /** Reopens an order that is still going (or just finished) from the pulls list. */
@@ -117,9 +150,10 @@ export function OpenPage() {
 
   const close = () => {
     const running = !!order && IN_PROGRESS.includes(order.status);
+    const others = batchRef.current ? batchRef.current.ids.length - batchRef.current.index - 1 : 0;
     aborted.current = true; following.current = null; clearTimeout(poll.current);
-    setOpening(null); setOrder(null);
-    if (running) notify('Your pack keeps opening in the background. Find it under Your pulls.');
+    setOpening(null); setOrder(null); toBatch(null); setSummary(null);
+    if (running || others) notify(`Your ${others ? 'packs keep' : 'pack keeps'} opening in the background. Find ${others ? 'them' : 'it'} under Your pulls.`);
     load();
   };
 
@@ -154,12 +188,15 @@ export function OpenPage() {
 
     {/* Packs */}
     <section id="packs" className="scroll-mt-32 pb-16">
-      <SectionTitle title="Choose a pack" sub={`One graded Pokémon card or luxury watch per pack, straight from Collector Crypt.${packs?.length && packs.every(p => p.quote.feeMicros === 0) ? '' : ` Prices include the ${pct(feeBps)} protection fee.`}`} />
+      <SectionTitle title="Choose a pack" sub={`One graded Pokémon card or luxury watch per pack, straight from Collector Crypt.${packs?.length && packs.every(p => p.quote.feeMicros === 0) ? '' : ` Prices include the ${pct(feeBps)} protection fee.`}`}
+        action={me.wallet && maxPerOpen > 1 ? <div role="radiogroup" aria-label="Packs per open" className="flex rounded-md border border-line bg-surface p-1">
+          {[1, 3, 5].filter(n => n <= maxPerOpen).map(n => <button key={n} role="radio" aria-checked={count === n} onClick={() => setQty(n)} className={`pixel h-8 min-w-11 rounded px-3 text-xs ${count === n ? 'bg-volt text-night' : 'text-muted hover:text-ink'}`}>{n}×</button>)}
+        </div> : undefined} />
       {packs && (['pokemon', 'watch'] as const).map(kind => {
         const list = packs.filter(p => (packDef(p.code)?.kind ?? 'pokemon') === kind);
         return list.length ? <div key={kind} className="mb-12">
           <div className="label mb-4 flex items-center gap-2">{kind === 'pokemon' ? 'Pokémon cards' : 'Luxury watches'}<span className="h-px flex-1 bg-line" /></div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">{list.map(p => <PackTile key={p.code} pack={p} signedIn={!!me.wallet} busy={opening !== null} waitMs={waitMs} onOpen={() => open(p)} />)}</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">{list.map(p => <PackTile key={p.code} pack={p} signedIn={!!me.wallet} busy={opening !== null} waitMs={waitMs} count={count} onOpen={() => open(p, count)} />)}</div>
         </div> : null;
       })}
       <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">
@@ -232,7 +269,8 @@ export function OpenPage() {
     </section>
 
     <Modal open={opening !== null} onClose={close} width="max-w-2xl" label="Opening your pack">
-      {opening && <OpenFlow pack={opening} order={order} onUpdate={setOrder} onAgain={() => { const p = packs?.find(x => x.code === opening.code); close(); if (p) setTimeout(() => open(p), 50); }} onClose={close} />}
+      {opening && <OpenFlow pack={opening} order={order} batch={batch ? { index: batch.index, count: batch.ids.length } : null} summary={summary} onNext={nextInBatch} onUpdate={setOrder}
+        onAgain={() => { const p = packs?.find(x => x.code === opening.code), n = batch ? batch.ids.length : 1; close(); if (p) setTimeout(() => open(p, Math.min(n, maxPerOpen)), 50); }} onClose={close} />}
     </Modal>
   </>;
 }
@@ -309,26 +347,40 @@ const clock = (ms: number) => {
   return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
 };
 
-function PackTile({ pack, signedIn, busy, waitMs, onOpen }: { pack: Pack; signedIn: boolean; busy: boolean; waitMs: number; onOpen: () => void }) {
-  const q = pack.quote, cooling = signedIn && waitMs > 0, blocked = signedIn && (!q.protected || cooling);
+function PackTile({ pack, signedIn, busy, waitMs, count, onOpen }: { pack: Pack; signedIn: boolean; busy: boolean; waitMs: number; count: number; onOpen: () => void }) {
+  const q = pack.quote, cooling = signedIn && waitMs > 0, blocked = signedIn && (!q.protected || cooling), several = signedIn && count > 1;
   return <article className="group flex min-w-0 flex-col">
     <Booster code={pack.code} priceUsd={pack.priceUsd} />
     <div className="mt-4 flex flex-wrap items-baseline justify-between gap-x-2">
-      <span className="pixel num text-lg">{money(q.totalMicros / 1e6)}</span>
-      {q.feeMicros > 0 && <span className="text-[11px] text-muted">incl. {money(q.feeMicros / 1e6)} fee</span>}
+      <span className="pixel num text-lg">{money(q.totalMicros * (several ? count : 1) / 1e6)}</span>
+      {several ? <span className="num text-[11px] text-muted">{count} × {money(q.totalMicros / 1e6)}</span>
+        : q.feeMicros > 0 && <span className="text-[11px] text-muted">incl. {money(q.feeMicros / 1e6)} fee</span>}
     </div>
     <div className="mt-1 min-h-10 text-sm">
-      {q.protected ? <span className="text-gain">Up to <b className="num">{money(q.maxRebateMicros / 1e6)}</b> back · {pct(q.coverageBps)}</span>
+      {q.protected ? <span className="text-gain">Up to <b className="num">{money(q.maxRebateMicros / 1e6)}</b> back{several ? ' each' : ''} · {pct(q.coverageBps)}</span>
         : signedIn ? <span className="text-xs text-loss">{q.reason}</span> : <span className="text-muted">Connect to see your coverage</span>}
     </div>
-    <button className="btn btn-primary mt-3 w-full" disabled={busy || blocked} onClick={onOpen}>{cooling ? <>Next pack in <span className="num">{clock(waitMs)}</span></> : <>{signedIn ? 'Open' : 'Connect to open'}<ArrowRight size={15} /></>}</button>
+    <button className="btn btn-primary mt-3 w-full" disabled={busy || blocked} onClick={onOpen}>{cooling ? <>Next pack in <span className="num">{clock(waitMs)}</span></> : <>{signedIn ? several ? `Open ${count}` : 'Open' : 'Connect to open'}<ArrowRight size={15} /></>}</button>
   </article>;
+}
+
+type Batch = { ids: string[]; index: number };
+type BatchSummary = { packs: number; paidUsd: number; valueUsd: number; backUsd: number; refunded: number };
+
+/** What a batch came to: refunded packs cost nothing, so they are left out of the totals. */
+function sum(orders: OrderView[]): BatchSummary {
+  const kept = orders.filter(o => o.status !== 'refunded' && o.status !== 'expired');
+  const add = (f: (o: OrderView) => number | null) => Math.round(kept.reduce((t, o) => t + (f(o) ?? 0), 0) * 100) / 100;
+  return { packs: orders.length, paidUsd: add(o => o.totalUsd), valueUsd: add(o => o.valueUsd), backUsd: add(o => o.rebateUsd), refunded: orders.length - kept.length };
 }
 
 const STEPS = [{ label: 'Pay', at: ['awaiting_payment', 'paying'] }, { label: 'Open', at: ['paid', 'buying'] }, { label: 'Send', at: ['delivering'] }, { label: 'Rebate', at: ['settling'] }];
 
-function OpenFlow({ pack, order, onUpdate, onAgain, onClose }: { pack: Pack; order: OrderView | null; onUpdate: (o: OrderView) => void; onAgain: () => void; onClose: () => void }) {
-  const priceUsd = pack.priceUsd, status = order?.status;
+function OpenFlow({ pack, order, batch, summary, onNext, onUpdate, onAgain, onClose }: {
+  pack: Pack; order: OrderView | null; batch: { index: number; count: number } | null; summary: BatchSummary | null;
+  onNext: () => void; onUpdate: (o: OrderView) => void; onAgain: () => void; onClose: () => void;
+}) {
+  const priceUsd = pack.priceUsd, status = order?.status, more = !!batch && batch.index < batch.count - 1;
   const step = status === 'complete' ? STEPS.length : STEPS.findIndex(s => s.at.includes(status ?? 'awaiting_payment'));
   const revealed = !!order?.card;
   const failed = status === 'refunded' || status === 'expired' || status === 'review' || status === 'refunding';
@@ -337,9 +389,10 @@ function OpenFlow({ pack, order, onUpdate, onAgain, onClose }: { pack: Pack; ord
     : revealed ? order!.card!.name.split(' · ')[0] : !order || status === 'awaiting_payment' ? 'Confirm in your wallet' : 'Opening your pack…';
   return <div className="relative grid gap-6 sm:grid-cols-[210px_1fr] sm:gap-8">
     {status === 'complete' && hit && <Confetti />}
-    <PackOpening code={pack.code} priceUsd={priceUsd} status={status} card={order?.card ?? null} hit={hit} rebateUsd={order?.rebateUsd ?? null} />
+    {/* In a batch each pack gets its own machine and plays its reveal, even if it finished while the last one was showing. */}
+    <PackOpening key={batch ? order?.id : undefined} replay={!!batch} code={pack.code} priceUsd={priceUsd} status={status} card={order?.card ?? null} hit={hit} rebateUsd={order?.rebateUsd ?? null} />
     <div className="min-w-0">
-      <div className="label pr-8">{money(priceUsd)} {packStyle(pack.code, priceUsd).name} pack · {pct(order?.coverageBps ?? pack.quote.coverageBps ?? 0)} covered</div>
+      <div className="label pr-8">{batch && `Pack ${batch.index + 1} of ${batch.count} · `}{money(priceUsd)} {packStyle(pack.code, priceUsd).name} pack · {pct(order?.coverageBps ?? pack.quote.coverageBps ?? 0)} covered</div>
       <h2 className="pixel mt-1.5 text-2xl" aria-live="polite">{title}</h2>
       {revealed && <p className="text-sm text-muted">{order!.card!.name.split(' · ').slice(1).join(' · ')}</p>}
 
@@ -369,9 +422,19 @@ function OpenFlow({ pack, order, onUpdate, onAgain, onClose }: { pack: Pack; ord
           <a key={label} className="inline-flex items-center gap-0.5 text-muted hover:text-volt" href={solscan('tx', s!)} target="_blank" rel="noreferrer">{label}<ArrowUpRight size={12} /></a>)}
       </div>
 
+      {summary && !more && <div className="enter mt-6 rounded-lg border border-line bg-raised p-4">
+        <div className="label">{summary.packs} packs{summary.refunded ? ` · ${summary.refunded} refunded` : ''}</div>
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          <Mini label="You paid" value={money(summary.paidUsd)} />
+          <Mini label="Cards worth" value={money(summary.valueUsd)} tone={summary.valueUsd >= summary.paidUsd ? 'text-gain' : ''} />
+          <Mini label="Back to you" value={summary.backUsd ? `+${money(summary.backUsd)}` : 'None'} tone={summary.backUsd ? 'text-gain' : 'text-muted'} />
+        </div>
+      </div>}
+
       <div className="mt-6 flex flex-wrap gap-2">
-        {status === 'complete' && <button className="btn btn-primary" onClick={onAgain}>Open another</button>}
-        <button className="btn btn-outline" onClick={onClose}>{status && FINAL.includes(status) ? 'Done' : 'Close'}</button>
+        {more && status && FINAL.includes(status) ? <button className="btn btn-primary" onClick={onNext}>Next pack ({batch!.index + 2} of {batch!.count})<ArrowRight size={15} /></button>
+          : status === 'complete' && <button className="btn btn-primary" onClick={onAgain}>{batch ? `Open ${batch.count} more` : 'Open another'}</button>}
+        <button className="btn btn-outline" onClick={onClose}>{status && FINAL.includes(status) && !more ? 'Done' : 'Close'}</button>
       </div>
     </div>
   </div>;

@@ -99,6 +99,39 @@ test('cooldowns: wallets wait between packs; a custom time wins; tier exceptions
   await s.db.close();
 });
 
+test('several packs open as separate orders, each with its own payment, receipt and rebate', async () => {
+  const s = await setup(), { wallet } = await user(s, 20_000);
+  const { orders, transactions } = await s.orders.createMany(wallet, 'pokemon_25', 3);
+  assert.equal(orders.length, 3);
+  assert.equal(new Set(transactions).size, 3, 'one payment per pack');
+  assert.ok(orders.every(o => o.status === 'awaiting_payment' && o.totalUsd === 27.5));
+  await assert.rejects(s.orders.create(wallet, 'pokemon_25'), /Finish or let your current order expire/, 'nothing else starts until they are paid');
+  for (const o of orders) await s.orders.pay(wallet, o.id, 'practice');
+  const done = [];
+  for (const o of orders) done.push(await settle(s, o.id));
+  assert.deepEqual(done.map(o => o.status), ['complete', 'complete', 'complete']);
+  assert.equal(new Set(done.map(o => o.paymentSignature)).size, 3, 'three payment receipts');
+  const batch = (await s.db.query<{ data: any }>('SELECT data FROM orders WHERE wallet=$1 ORDER BY (data->\'batch\'->>\'index\')::int', [wallet])).rows.map(r => r.data.batch);
+  assert.deepEqual(batch.map(b => [b.index, b.count]), [[0, 3], [1, 3], [2, 3]]);
+  assert.equal(new Set(batch.map(b => b.id)).size, 1, 'one batch');
+  await s.db.close();
+});
+
+test('several packs are refused up front when the pool, the wallet or a cooldown cannot take them all', async () => {
+  const s = await setup(), { wallet } = await user(s, 20_000), slow = await user(s, 20_000);
+  await assert.rejects(s.orders.createMany(wallet, 'pokemon_25', 6), /between 1 and 5/);
+  s.solana.usdc.set(s.solana.poolAddress, BigInt(micros(60)));
+  s.pool.invalidate();
+  await assert.rejects(s.orders.createMany(wallet, 'pokemon_25', 3), /can cover 2 of these packs right now\. Try 2/, 'each $25 Whale pack can need $25');
+  assert.equal((await s.orders.createMany(wallet, 'pokemon_25', 2)).orders.length, 2);
+
+  await s.settings.save({ ...s.settings.current, cooldown: { minutes: 0, wallets: [{ wallet: slow.wallet, minutes: 10 }] } });
+  assert.equal(s.orders.maxPerOpen(slow.wallet), 1);
+  assert.equal(s.orders.maxPerOpen(wallet), 5);
+  await assert.rejects(s.orders.createMany(slow.wallet, 'pokemon_25', 2), /one pack at a time/);
+  await s.db.close();
+});
+
 test('unpaid orders expire and release their reservation', async () => {
   const s = await setup(), { wallet } = await user(s);
   s.solana.paymentLifetimeMs = -1;

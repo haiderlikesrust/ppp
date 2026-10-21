@@ -25,9 +25,9 @@ type Phase = 'insert' | 'confirm' | 'open' | 'reveal' | 'done' | 'failed';
  * it. A hit gets rays and a burst; a bad pull gets green coins and its rebate. Reopening a finished
  * order just shows the card.
  */
-export function PackOpening({ code, priceUsd, status, card, hit, rebateUsd = null }: { code: string; priceUsd: number; status?: OrderStatus; card: Card | null; hit: boolean; rebateUsd?: number | null }) {
-  // The reveal only plays if this screen showed the machine first.
-  const watched = useRef(!card).current;
+export function PackOpening({ code, priceUsd, status, card, hit, rebateUsd = null, replay = false }: { code: string; priceUsd: number; status?: OrderStatus; card: Card | null; hit: boolean; rebateUsd?: number | null; replay?: boolean }) {
+  // The reveal only plays if this screen showed the machine first, or, with `replay`, every time it mounts.
+  const watched = useRef(replay || !card).current;
   const arrived = useRef<number | null>(null);
   if (card && arrived.current === null) arrived.current = watched ? Date.now() : 0;
 
