@@ -64,7 +64,18 @@ export async function buyPack(options: {
     }
     const status = await client.packStatus(order.memo!);
     if (status.pack?.refunded) throw new Error('Provider refunded this pack. No new payment will be made.');
-    if (status.pack?.status !== 'confirmed') return pending('Waiting for the provider to see the confirmed payment.');
+    if (status.pack?.status !== 'confirmed') {
+      // Collector Crypt normally registers a paid pack within seconds. When it hasn't after 30s, ask it to open the
+      // pack, as its own site does right after paying: openPack never buys, it only opens a paid pack (or returns its
+      // award). At most once a minute; its answer doesn't matter, the next check reads the pack's status again.
+      const now = Date.now();
+      if (!order.paidAt) { order.paidAt = now; await store.save(order); }
+      if (now - order.paidAt >= 30_000 && now - (order.nudgedAt ?? 0) >= 60_000) {
+        order.nudgedAt = now; await store.save(order);
+        await client.openPack(order.memo!).catch(() => null);
+      }
+      return pending('Waiting for the provider to see the confirmed payment.');
+    }
     if (status.pack.wallet !== order.wallet || status.pack.pack_type !== packType || status.pack.transaction_signature !== order.signature) throw new Error('Provider purchase record does not match the saved payment.');
     const opened = await client.openPack(order.memo!);
     if (['WAITING_FOR_WEBHOOK', 'SEND_PENDING'].includes(opened.code)) return pending('Card delivery pending. Resume this same order.');

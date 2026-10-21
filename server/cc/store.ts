@@ -6,6 +6,8 @@ export type Purchase = {
   signedTransaction?: string; signature?: string; paid?: boolean; card?: Card;
   /** When the payment was first seen as never landed; confirmed a minute later before giving up. */
   expiredSeenAt?: number;
+  /** When the payment was first seen confirmed, and when Collector Crypt was last asked to open the pack while it hadn't registered it. */
+  paidAt?: number; nudgedAt?: number;
 };
 export interface PurchaseStore {
   get(id: string): Promise<Purchase | null>;
