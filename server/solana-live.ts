@@ -9,6 +9,7 @@ import { swap } from './swap';
 import { collectCreatorFees, creatorFeesDue } from './fees';
 import type { BuiltPayment, CcPayment, HolderHistory, PaymentState, Solana } from './ports';
 import { readHolderHistory } from './coin-history';
+import { rateLimited } from './redact';
 import type { Settings } from '../shared/types';
 
 /**
@@ -20,6 +21,8 @@ export async function readParsedTransactions(rpc: Pick<Connection, 'getParsedTra
   const options = { maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' as const };
   try { return await rpc.getParsedTransactions(signatures, options); }
   catch (error) {
+    // Rate limited: reading each one on its own would only add load.
+    if (rateLimited(error)) throw error;
     const each = await Promise.all(signatures.map(signature => rpc.getParsedTransaction(signature, options).then(tx => tx, () => undefined)));
     if (each.every(tx => tx === undefined)) throw error;
     return each.map(tx => tx ?? null);
