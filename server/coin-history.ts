@@ -61,9 +61,8 @@ async function accountHistory(rpc: Connection, read: Reader, account: PublicKey,
   const wanted = prior ? [...inWindow, prior] : inWindow;
   if (wanted.length > MAX_CHANGES) throw new Error('This wallet trades the coin too often to check automatically. Contact us to claim.');
   const changes: Change[] = [], key = account.toBase58();
-  // 20 at a time: a batch counts one call per item against the RPC's per-second limit.
-  for (let i = 0; i < wanted.length; i += 20) {
-    const batch = wanted.slice(i, i + 20), txs = await read(rpc, batch.map(s => s.signature));
+  for (let i = 0; i < wanted.length; i += 50) {
+    const batch = wanted.slice(i, i + 50), txs = await read(rpc, batch.map(s => s.signature));
     txs.forEach((tx, j) => { const balance = postBalance(tx, key); if (balance !== null) changes.push({ at: batch[j].blockTime! * 1000, balance }); });
   }
   changes.sort((a, b) => a.at - b.at);

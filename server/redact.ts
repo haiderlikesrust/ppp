@@ -16,14 +16,9 @@ export function redact(message: string) {
 }
 
 /** Programming errors and failed network calls never show their raw text to visitors. */
-/** An RPC provider refusing calls for going over its rate limit ("429", "50/second request limit reached"). */
-export const rateLimited = (error: unknown) => /\b429\b|too many requests|request limit|rate limit/i.test((error as Error)?.message ?? '');
-
 export function publicError(error: Error & { statusCode?: number }) {
   if (error.statusCode) return { status: error.statusCode, message: redact(error.message) };
   if (error instanceof TypeError && /fetch failed|network/i.test(error.message)) return { status: 503, message: 'A service we depend on is unavailable right now. Please try again shortly.' };
-  // The RPC provider's per-second limit, still hit after the paced retries.
-  if (rateLimited(error)) return { status: 503, message: 'The Solana network is busy right now. Please try again in a few seconds.' };
   if (error instanceof TypeError || error instanceof RangeError || error instanceof ReferenceError || error instanceof SyntaxError) return { status: 500, message: 'Something went wrong. Please try again.' };
   return { status: 400, message: redact(error.message) };
 }

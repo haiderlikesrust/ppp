@@ -207,8 +207,6 @@ export class Orders {
   }
   async list(wallet: string, limit = 50) { return (await this.db.query<Row>('SELECT * FROM orders WHERE wallet=$1 AND status<>$2 ORDER BY created_at DESC LIMIT $3', [wallet, 'expired', limit])).rows.map(view); }
   async open() { return (await this.db.query<Row>(`SELECT * FROM orders WHERE status = ANY($1) ORDER BY created_at`, [OPEN])).rows; }
-  /** Whether any paid pack is still being opened (bought, sent, settled or refunded). */
-  async opening() { return (await this.db.query("SELECT 1 FROM orders WHERE status IN ('paying','paid','buying','delivering','settling','refunding') LIMIT 1")).rows.length > 0; }
 
   /** Advances every open order by at most one step. Call from the coordinator's Serial queue. */
   async step() {

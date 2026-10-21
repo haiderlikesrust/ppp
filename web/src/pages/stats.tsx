@@ -152,7 +152,7 @@ function PackStatsSection() {
     load(); const id = setInterval(() => { if (!document.hidden) load(); }, read ? 60_000 : 10_000);
     return () => { live = false; clearInterval(id); };
   }, [read]);
-  const groups = [['Pokémon machines', 'pokemon'], ['Sports machines', 'sports'], ['Watch machines', 'watch']] as const;
+  const groups = [['Pokémon machines', 'pokemon'], ['Watch machines', 'watch']] as const;
 
   return <section className="pb-14">
     <SectionTitle title="Pack stats" sub={`From each Collector Crypt machine's latest pulls (up to 5,000 per machine), refreshed every 2 minutes${stats?.updatedAt ? `, last ${ago(stats.updatedAt)}` : ''}. The same math sets our fees.`} />

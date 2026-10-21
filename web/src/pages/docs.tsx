@@ -54,7 +54,7 @@ export function DocsPage() {
       <p className="mt-5 text-lg text-muted">How rebates are worked out, who qualifies, where the money comes from, and how to check every step on-chain.</p>
 
       <Entry n={1} id="basics" title="The short version">
-        <p>Most packs on Collector Crypt, Pokémon cards, sports cards and luxury watches alike, pull something worth less than the pack. A few pull far more. Pullback pays token holders part of that downside back, in USDC.</p>
+        <p>Most packs on Collector Crypt, Pokémon cards and luxury watches alike, pull something worth less than the pack. A few pull far more. Pullback pays token holders part of that downside back, in USDC.</p>
         <div className="not-prose my-6 grid gap-px overflow-hidden rounded-[10px] border border-line bg-line sm:grid-cols-3">
           {[['Hold the token', 'Your lowest balance sets your tier and how much you get back.'], ['Open a pack', `Here, with a ${fee} protection fee, or on Collector Crypt, pump.fun or Jupiter.`], ['Get some back', 'When the card is worth less than the pack, part of the gap is paid to you.']].map(([t, d], i) =>
             <div key={t} className="bg-surface p-5"><div className="pixel text-2xl text-volt">0{i + 1}</div><div className="pixel mt-3 text-ink">{t}</div><p className="mt-1 text-sm">{d}</p></div>)}
@@ -65,7 +65,7 @@ export function DocsPage() {
       <Entry n={2} id="math" title="The rebate math">
         <div className="pixel not-prose my-6 rounded-[10px] border border-volt/40 bg-volt-soft px-6 py-5 text-center text-base text-volt sm:text-lg">rebate = coverage × (pack price − card value)</div>
         <ul>
-          <li><b>Pack price</b> is what the pack costs on Collector Crypt: $25 to $500 for Pokémon cards, $50 to $500 for sports cards, $500 for watches. The protection fee isn't part of it.</li>
+          <li><b>Pack price</b> is what the pack costs on Collector Crypt: $25 to $500 for Pokémon cards, $500 for watches. The protection fee isn't part of it.</li>
           <li><b>Card value</b> is the insured value Collector Crypt records for the card or watch at the moment it's pulled. Nobody can change it afterwards, including us.</li>
           <li><b>Coverage</b> comes from your tier, and is lower for packs opened elsewhere.</li>
           <li>One rebate is capped at <b>{money(s.maxRebateUsd)}</b>. A card worth the pack price or more needs no rebate.</li>
@@ -99,7 +99,7 @@ export function DocsPage() {
 
       <Entry n={4} id="here" title="Opening a pack here">
         <ol>
-          <li><b>Pick a pack.</b> Pokémon cards by type, sports cards by sport, or a watch pack. You see the price plus the {fee} protection fee, your coverage and the most you could get back.</li>
+          <li><b>Pick a pack.</b> Pokémon cards by type, or a watch pack. You see the price plus the {fee} protection fee, your coverage and the most you could get back.</li>
           <li><b>Pay once.</b> Your wallet signs a single USDC payment. Nothing else is ever requested.</li>
           <li><b>We rip it.</b> We buy the pack on Collector Crypt and send the graded card NFT to your wallet.</li>
           <li><b>Pullback, automatically.</b> If the card is worth less than the pack, the rebate lands in your wallet straight away. No claim needed.</li>

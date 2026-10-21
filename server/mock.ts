@@ -139,8 +139,6 @@ export class MockSolana implements Solana {
 const NAMES = ['Charizard', 'Pikachu', 'Umbreon', 'Mewtwo', 'Gengar', 'Rayquaza', 'Lugia', 'Eevee', 'Blastoise', 'Snorlax', 'Gyarados', 'Dragonite', 'Mew', 'Sylveon', 'Greninja', 'Lucario'];
 const WATCHES = ['Submariner', 'Speedmaster', 'Black Bay', 'Santos', 'Carrera', 'Navitimer', 'Royal Oak', 'Nautilus'];
 const MAKERS = ['Rolex', 'Omega', 'Tudor', 'Cartier', 'TAG Heuer', 'Breitling', 'Audemars Piguet', 'Patek Philippe'];
-const ATHLETES = ['LeBron James', 'Luka Doncic', 'Shohei Ohtani', 'Mickey Mantle', 'Patrick Mahomes', 'Josh Allen', 'Lionel Messi', 'Erling Haaland', 'Victor Wembanyama', 'Aaron Judge'];
-const SPORTS_SETS = ['Panini Prizm', 'Topps Chrome', 'Bowman Chrome', 'Panini Select', 'Topps Chrome UEFA', 'Donruss Optic'];
 const SETS = ['Base Set', 'Evolving Skies', 'Hidden Fates', 'Crown Zenith', '151', 'Paldean Fates', 'Lost Origin', 'Celebrations'];
 
 /** Deterministic pseudo-random numbers from a seed string. */
@@ -198,8 +196,7 @@ export class MockPacks implements PackProvider {
   card(seed: string, priceUsd: number, code = `pokemon_${priceUsd}`) {
     const rand = seeded(seed), value = Math.round(priceUsd * mockValueRatio(rand) * 100) / 100;
     const watch = packDef(code)?.kind === 'watch', pick = (list: string[]) => list[Math.floor(rand() * list.length)];
-    const sports = packDef(code)?.kind === 'sports';
-    const name = watch ? pick(WATCHES) : sports ? pick(ATHLETES) : pick(NAMES), set = watch ? pick(MAKERS) : sports ? pick(SPORTS_SETS) : pick(SETS), grade = watch ? 'Box & papers' : `PSA ${7 + Math.floor(rand() * 4)}`;
+    const name = watch ? pick(WATCHES) : pick(NAMES), set = watch ? pick(MAKERS) : pick(SETS), grade = watch ? 'Box & papers' : `PSA ${7 + Math.floor(rand() * 4)}`;
     return { mint: new PublicKey(createHash('sha256').update(`mint:${seed}`).digest()).toBase58(), name: `${name} · ${set} · ${grade}`, image: null, insuredValueUsd: value, rarity: value >= priceUsd * 1.4 ? 'Epic' : value >= priceUsd ? 'Rare' : 'Common', transferSignature: null };
   }
 

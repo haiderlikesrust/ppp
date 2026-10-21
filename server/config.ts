@@ -16,8 +16,6 @@ const env = z.object({
   POOL_PRIVATE_KEY: z.string().trim().default(''),
   SOLANA_RPC_URL: z.string().default(''),
   DAS_RPC_URL: z.string().default(''),
-  /** Most calls per second sent to SOLANA_RPC_URL. Keep it a little under your RPC plan's limit. */
-  RPC_REQUESTS_PER_SECOND: z.coerce.number().int().min(1).max(10_000).default(40),
   JUPITER_API_KEY: z.string().default(''),
   COLLECTOR_CRYPT_API_KEY: z.string().default(''),
   COLLECTOR_CRYPT_PAYMENT_WALLET: z.string().default('GachaNgyXTU3zFogQ8Z5jR2BLXs8215X2AtEH18VxJq3'),

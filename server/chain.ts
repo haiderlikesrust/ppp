@@ -4,7 +4,6 @@ import bs58 from 'bs58';
 import { MPL_CORE_PROGRAM_ID } from '@metaplex-foundation/mpl-core';
 import { config } from './config';
 import { Jobs, PendingOperation, ReviewRequired } from './jobs';
-import { pacedFetch } from './rpc-pace';
 import type { Settings } from '../shared/types';
 
 export const CORE_PROGRAM = MPL_CORE_PROGRAM_ID;
@@ -12,10 +11,8 @@ export const CORE_PROGRAM = MPL_CORE_PROGRAM_ID;
 export const MAX_TX_VERSION = 1;
 export type TxPolicy = { kind: 'swap' | 'internal'; inputMint?: string; maxInput?: bigint; minInput?: bigint; outputMint?: string; minOutput?: bigint; allowedPrograms?: string[] };
 
-/** The one RPC connection. Calls are paced under the provider's per-second limit; the 8s timeout starts when a call is sent, not while it waits its turn. */
 export function connection(url = config.SOLANA_RPC_URL) {
-  const timed: typeof fetch = (u, init) => fetch(u, { ...init, signal: AbortSignal.any([...(init?.signal ? [init.signal as AbortSignal] : []), AbortSignal.timeout(8000)]) });
-  return url ? new Connection(url, { commitment: 'confirmed', confirmTransactionInitialTimeout: 20_000, disableRetryOnRateLimit: true, fetch: pacedFetch(config.RPC_REQUESTS_PER_SECOND, timed) }) : null;
+  return url ? new Connection(url, { commitment: 'confirmed', confirmTransactionInitialTimeout: 20_000, disableRetryOnRateLimit: true, fetch: (u, init) => fetch(u, { ...init, signal: AbortSignal.any([...(init?.signal ? [init.signal as AbortSignal] : []), AbortSignal.timeout(8000)]) }) }) : null;
 }
 
 /**

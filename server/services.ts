@@ -59,12 +59,6 @@ export async function createServices(options: { db?: Database; solana?: Solana; 
   return { db, jobs, settings, solana, packs, holders, pool, gas, orders, claims, treasury, feed, serial: new Serial(), practice: solana instanceof MockSolana };
 }
 
-/** Whether a creator-fee claim may take the queue now: a minute after the last, and not while packs open unless 10 minutes have passed. */
-export function feeClaimAllowed(now: number, lastClaim: number, packsOpening: boolean) {
-  const since = now - lastClaim;
-  return since >= 60_000 && (!packsOpening || since >= 10 * 60_000);
-}
-
 /** Background loops. Every financial step runs through the one Serial queue. */
 export function startCoordinator(s: Services, log: (message: string, error?: unknown) => void) {
   const timers: ReturnType<typeof setInterval>[] = [];
@@ -80,13 +74,10 @@ export function startCoordinator(s: Services, log: (message: string, error?: unk
   // One RPC call per active wallet and no money: kept out of the queue so a long sweep never delays payments.
   every(15 * 60_000, 'snapshots', async () => { await s.holders.snapshotAll(); await s.holders.prune(); }, false);
   every(5 * 60_000, 'treasury', () => s.treasury.run());
-  // Creator fees: a claim and its swaps hold the queue for a while, so packs being opened come first. Checked every
-  // second, but claimed at most once a minute, and while a pack is mid-opening only if the last claim is 10+ minutes old.
-  let lastFeeClaim = 0;
+  // Creator fees: a read-only vault check every second; claiming and swapping take a turn in the queue only when due.
+  // A check still running when the next second comes skips that tick.
   every(1_000, 'creator-fees', async () => {
-    if (!feeClaimAllowed(Date.now(), lastFeeClaim, await s.orders.opening())) return;
     if (!(await s.treasury.creatorFeesDue())) return;
-    lastFeeClaim = Date.now();
     await s.serial.run(() => s.treasury.creatorFees(true)).catch(error => { if (!(error instanceof PendingOperation)) throw error; });
   }, false);
   // One balance check per wallet; a top-up only when OPS runs low.

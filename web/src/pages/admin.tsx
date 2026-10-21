@@ -120,7 +120,7 @@ export function AdminPage() {
       </div>
     </Section>
 
-    <Section title="Creator fees" sub="Your coin's pump.fun creator fees are checked every second and claimed into POOL at most once a minute (packs being opened go first) and sold for USDC. Big claims are sold in parts so the price is not pushed down too far.">
+    <Section title="Creator fees" sub="Your coin's pump.fun creator fees are checked every second, claimed into POOL and sold for USDC. Big claims are sold in parts so the price is not pushed down too far.">
       <div className="grid gap-4 sm:grid-cols-4">
         <Field label="Claim once at least $" hint="0 = claim any amount"><input className="input num" type="number" step="0.5" value={form.creatorFeeMinUsd} onChange={e => set('creatorFeeMinUsd', n(e.target.value))} /></Field>
         <Field label="Max price impact %" hint="Larger claims are split"><input className="input num" type="number" step="0.5" value={form.maxPriceImpactBps / 100} onChange={e => set('maxPriceImpactBps', Math.round(n(e.target.value) * 100))} /></Field>

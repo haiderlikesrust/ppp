@@ -167,7 +167,7 @@ export function OpenPage() {
     <section className="enter flex flex-col items-center py-14 text-center md:py-24">
       <span className="tag bg-volt-soft text-volt"><i className="live-dot" />{mode === 'mainnet' ? 'Live on Solana' : mode === 'practice' ? 'Practice mode' : 'Launching on Solana'}</span>
       <h1 className="pixel mt-7 text-[2.3rem] font-bold leading-[1.05] min-[420px]:text-5xl sm:text-6xl md:text-[5.5rem]">BAD PULL?<br /><span className="text-volt">PULL BACK.</span></h1>
-      <p className="mt-7 max-w-xl text-lg text-muted">Open Collector Crypt packs here: Pokémon cards, sports cards and luxury watches. When a pull comes in under the pack price, part of the loss lands back in your wallet in USDC, automatically.</p>
+      <p className="mt-7 max-w-xl text-lg text-muted">Open Collector Crypt packs here, Pokémon cards and luxury watches. When a pull comes in under the pack price, part of the loss lands back in your wallet in USDC, automatically.</p>
       <div className="mt-9 grid w-full gap-3 sm:flex sm:w-auto">
         <a href="#packs" className="btn btn-primary h-12 px-7">Open a pack<ArrowDown size={16} /></a>
       </div>
@@ -188,14 +188,14 @@ export function OpenPage() {
 
     {/* Packs */}
     <section id="packs" className="scroll-mt-32 pb-16">
-      <SectionTitle title="Choose a pack" sub={`One graded Pokémon card, sports card or luxury watch per pack, straight from Collector Crypt.${packs?.length && packs.every(p => p.quote.feeMicros === 0) ? '' : ` Prices include the ${pct(feeBps)} protection fee.`}`}
+      <SectionTitle title="Choose a pack" sub={`One graded Pokémon card or luxury watch per pack, straight from Collector Crypt.${packs?.length && packs.every(p => p.quote.feeMicros === 0) ? '' : ` Prices include the ${pct(feeBps)} protection fee.`}`}
         action={me.wallet && maxPerOpen > 1 ? <div role="radiogroup" aria-label="Packs per open" className="flex rounded-md border border-line bg-surface p-1">
           {[1, 3, 5].filter(n => n <= maxPerOpen).map(n => <button key={n} role="radio" aria-checked={count === n} onClick={() => setQty(n)} className={`pixel h-8 min-w-11 rounded px-3 text-xs ${count === n ? 'bg-volt text-night' : 'text-muted hover:text-ink'}`}>{n}×</button>)}
         </div> : undefined} />
-      {packs && (['pokemon', 'sports', 'watch'] as const).map(kind => {
+      {packs && (['pokemon', 'watch'] as const).map(kind => {
         const list = packs.filter(p => (packDef(p.code)?.kind ?? 'pokemon') === kind);
         return list.length ? <div key={kind} className="mb-12">
-          <div className="label mb-4 flex items-center gap-2">{{ pokemon: 'Pokémon cards', sports: 'Sports cards', watch: 'Luxury watches' }[kind]}<span className="h-px flex-1 bg-line" /></div>
+          <div className="label mb-4 flex items-center gap-2">{kind === 'pokemon' ? 'Pokémon cards' : 'Luxury watches'}<span className="h-px flex-1 bg-line" /></div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">{list.map(p => <PackTile key={p.code} pack={p} signedIn={!!me.wallet} busy={opening !== null} waitMs={waitMs} count={count} onOpen={() => open(p, count)} />)}</div>
         </div> : null;
       })}
