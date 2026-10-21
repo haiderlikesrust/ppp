@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS: Settings = {
     { id: 't2', name: 'Dolphin', minSupplyPpm: 10_000, onsiteCoverageBps: 5_000, offsiteCoverageBps: 3_500 },
     { id: 't3', name: 'Whale', minSupplyPpm: 20_000, onsiteCoverageBps: 10_000, offsiteCoverageBps: 6_000 },
   ],
+  walletTiers: [],
   maxRebateUsd: 250,
   onsiteHoldHours: 0,
   offsiteHoldHours: 0,
@@ -135,6 +136,8 @@ export function settingsProblems(s: Settings, calibration: Distribution[] = [], 
     if (prev && t.minSupplyPpm === prev.minSupplyPpm) problems.push(`${t.name} and ${prev.name} have the same minimum balance.`);
   }
   if (new Set(s.tiers.map(t => t.id)).size !== s.tiers.length) problems.push('Tier IDs must be unique.');
+  for (const e of s.walletTiers) if (!s.tiers.some(t => t.id === e.tierId)) problems.push(`Tier exception for ${e.wallet.slice(0, 4)}…${e.wallet.slice(-4)} points at a tier that no longer exists.`);
+  if (new Set(s.walletTiers.map(e => e.wallet)).size !== s.walletTiers.length) problems.push('Each wallet can have only one tier exception.');
   if (s.poolShareBps < 0 || s.poolShareBps > 10_000) problems.push('Pool share must be between 0% and 100%.');
   // Fee guardrail: only enforced once calibration data exists for a price.
   const subsidy = packsPerDay > 0 ? Math.floor(s.creatorFeeBudgetUsdPerDay * 10_000 / packsPerDay) : 0;

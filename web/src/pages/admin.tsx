@@ -72,6 +72,17 @@ export function AdminPage() {
       <button className="btn btn-outline btn-sm mt-3" onClick={() => set('tiers', [...form.tiers, { id: `t${Date.now() % 100_000}`, name: 'New tier', minSupplyPpm: 50_000, onsiteCoverageBps: 10_000, offsiteCoverageBps: 4_000 }])}><Plus size={14} />Add tier</button>
     </Section>
 
+    <Section title="Tier exceptions" sub="Wallets that get a tier on packs opened here whatever they hold. A wallet holding enough for a better tier gets that one. Off-site claims still go by holdings. Rebates to these wallets come from the vault like any other.">
+      {form.walletTiers.length > 0 && <div className="grid gap-2">{form.walletTiers.map((e, i) => <div key={i} className="flex flex-wrap items-center gap-2">
+        <input className="input num min-w-0 flex-1 basis-72" placeholder="Wallet address" spellCheck={false} value={e.wallet} onChange={ev => set('walletTiers', form.walletTiers.map((x, j) => j === i ? { ...x, wallet: ev.target.value.trim() } : x))} />
+        <select className="input w-40" value={e.tierId} onChange={ev => set('walletTiers', form.walletTiers.map((x, j) => j === i ? { ...x, tierId: ev.target.value } : x))}>
+          {form.tiers.map(t => <option key={t.id} value={t.id}>{t.name} · {t.onsiteCoverageBps / 100}%</option>)}
+        </select>
+        <button className="btn btn-outline btn-sm px-2.5" aria-label="Remove exception" onClick={() => set('walletTiers', form.walletTiers.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
+      </div>)}</div>}
+      <button className={`btn btn-outline btn-sm ${form.walletTiers.length ? 'mt-3' : ''}`} onClick={() => { const top = [...form.tiers].sort((a, b) => b.onsiteCoverageBps - a.onsiteCoverageBps)[0]; if (top) set('walletTiers', [...form.walletTiers, { wallet: '', tierId: top.id }]); }}><Plus size={14} />Add wallet</button>
+    </Section>
+
     <Section title="Off-site claims and limits">
       <div className="grid gap-4 sm:grid-cols-4">
         <Field label="Claims"><Toggle checked={form.offsite.enabled} onChange={v => set('offsite', { ...form.offsite, enabled: v })} label="Enabled" /></Field>
@@ -151,7 +162,7 @@ export function AdminPage() {
       </div>)}</div>
     </Section>
 
-    {dirty && <div className="enter sticky bottom-5 z-30 mx-auto flex w-fit items-center gap-3 rounded-lg border border-volt/40 bg-raised py-2 pl-5 pr-2 text-sm shadow-2xl">
+    {dirty && <div className="enter sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-30 mx-auto lg:bottom-5 flex w-fit items-center gap-3 rounded-lg border border-volt/40 bg-raised py-2 pl-5 pr-2 text-sm shadow-2xl">
       Unsaved changes<button className="btn btn-quiet btn-sm" disabled={saving} onClick={() => setForm(data.settings)}>Discard</button><button className="btn btn-primary btn-sm" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
     </div>}
   </div>;

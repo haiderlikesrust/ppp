@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { Keypair, VersionedTransaction } from '@solana/web3.js';
 import { setup, settle, user } from './helpers';
 import { createServices } from '../server/services';
-import { rebateMicros, micros } from '../shared/protection';
+import { rebateMicros, micros, settingsProblems } from '../shared/protection';
+import { settingsSchema } from '../server/settings';
 
 test('happy path: pay, buy, deliver, auto-rebate, fee split, reservation released', async () => {
   const s = await setup(), { wallet } = await user(s, 10_000);
@@ -44,6 +45,25 @@ test('protection is refused when the pool cannot reserve the maximum rebate', as
   await assert.rejects(s.orders.create(wallet, 'pokemon_500'), /pool is full/);
   const ok = await s.orders.create(wallet, 'pokemon_50');
   assert.equal(ok.order.coverageBps, 10_000);
+  await s.db.close();
+});
+
+test('a tier exception lets a wallet open packs at its tier whatever it holds; a better held tier still wins', async () => {
+  const s = await setup(), granted = await user(s, 0), holder = await user(s, 20_000), other = await user(s, 0);
+  await s.settings.save({ ...s.settings.current, walletTiers: [{ wallet: granted.wallet, tierId: 't3' }, { wallet: holder.wallet, tierId: 't1' }] });
+  await assert.rejects(s.orders.create(other.wallet, 'pokemon_50'), /Hold more|lowest balance/, 'no exception, no tier');
+
+  const { order } = await s.orders.create(granted.wallet, 'pokemon_50');
+  assert.equal(order.coverageBps, 10_000, 'quoted at the granted Whale tier with no holdings');
+  await s.orders.pay(granted.wallet, order.id, 'practice');
+  const done = await settle(s, order.id);
+  assert.equal(done.status, 'complete');
+  assert.equal(done.coverageBps, 10_000, 'and settled at it');
+  assert.equal((await s.holders.view(granted.wallet, granted.activatedAt)).tier?.id, 't3', 'the site shows the granted tier');
+  assert.equal((await s.orders.create(holder.wallet, 'pokemon_50')).order.coverageBps, 10_000, 'a Whale holder given a Shrimp exception stays a Whale');
+
+  assert.throws(() => settingsSchema.parse({ ...s.settings.current, walletTiers: [{ wallet: 'not a wallet', tierId: 't3' }] }));
+  assert.match(settingsProblems({ ...s.settings.current, walletTiers: [{ wallet: granted.wallet, tierId: 'gone' }] }).join(' '), /tier that no longer exists/);
   await s.db.close();
 });
 

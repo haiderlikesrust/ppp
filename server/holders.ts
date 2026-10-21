@@ -61,21 +61,28 @@ export class Holders {
     return taken;
   }
 
+  /** The better of the tier a wallet holds and the one the owner guarantees it (Admin → Tier exceptions). */
+  withException(wallet: string, held: HolderTier | null) {
+    const s = this.settings.current, id = s.walletTiers.find(e => e.wallet === wallet)?.tierId;
+    const granted = id ? s.tiers.find(t => t.id === id) ?? null : null;
+    return granted && (!held || granted.onsiteCoverageBps > held.onsiteCoverageBps) ? granted : held;
+  }
+
   /**
-   * Lowest balance from the last snapshot at or before `from` through `to`.
-   * With `knownHistoryOnly`, a wallet first seen after `from` is judged on the snapshots
-   * since it connected (a new wallet: its current balance) instead of failing outright.
+   * On-site tier: the lowest balance from the last snapshot at or before `from` through `to`, or the
+   * wallet's tier exception if that is better. With `knownHistoryOnly`, a wallet first seen after `from`
+   * is judged on the snapshots since it connected (a new wallet: its current balance) instead of failing outright.
    */
   async tierFor(wallet: string, from: number, to: number, options: { knownHistoryOnly?: boolean } = {}): Promise<TierCheck> {
     const rows = (await this.db.query<{ taken_at: string; balance: string; supply: string }>(
       `SELECT taken_at::text, balance, supply FROM snapshots WHERE wallet=$1 AND taken_at <= $3
          AND taken_at >= COALESCE((SELECT MAX(taken_at) FROM snapshots WHERE wallet=$1 AND taken_at <= $2), $2)
        ORDER BY taken_at`, [wallet, from, to])).rows;
-    const empty = { tier: null, minBalance: 0n, supply: 0n };
-    if (!rows.length || (!options.knownHistoryOnly && Number(rows[0].taken_at) > from)) return { ...empty, reason: 'There is no record of your holdings at the start of the coverage window.' };
+    const granted = this.withException(wallet, null), empty = { tier: granted, minBalance: 0n, supply: 0n };
+    if (!rows.length || (!options.knownHistoryOnly && Number(rows[0].taken_at) > from)) return { ...empty, reason: granted ? null : 'There is no record of your holdings at the start of the coverage window.' };
     const minBalance = rows.reduce((min, r) => BigInt(r.balance) < min ? BigInt(r.balance) : min, BigInt(rows[0].balance));
     const supply = BigInt(rows[rows.length - 1].supply);
-    const tier = holderTier(minBalance, supply, this.settings.current.tiers);
+    const tier = this.withException(wallet, holderTier(minBalance, supply, this.settings.current.tiers));
     const lowest = [...this.settings.current.tiers].sort((a, b) => a.minSupplyPpm - b.minSupplyPpm)[0];
     return { tier, minBalance, supply, reason: tier ? null : `Your lowest balance in the window was ${(supplyPpm(minBalance, supply) / 10_000).toFixed(3)}% of supply; ${lowest ? `${(lowest.minSupplyPpm / 10_000).toFixed(3)}%` : 'a tier'} is needed.` };
   }
@@ -133,6 +140,6 @@ export class Holders {
   async view(wallet: string, activatedAt: number): Promise<HolderView> {
     if (!this.solana.holderMint) return { configured: false, balance: '0', supply: '0', ppm: 0, tier: null, activatedAt, offsiteCoverageFrom: null };
     const { balance, supply } = await this.recent(wallet);
-    return { configured: true, balance: balance.toString(), supply: supply.toString(), ppm: supplyPpm(balance, supply), tier: holderTier(balance, supply, this.settings.current.tiers), activatedAt, offsiteCoverageFrom: this.settings.current.offsiteActivationHours > 0 ? activatedAt + this.settings.current.offsiteActivationHours * HOUR : null };
+    return { configured: true, balance: balance.toString(), supply: supply.toString(), ppm: supplyPpm(balance, supply), tier: this.withException(wallet, holderTier(balance, supply, this.settings.current.tiers)), activatedAt, offsiteCoverageFrom: this.settings.current.offsiteActivationHours > 0 ? activatedAt + this.settings.current.offsiteActivationHours * HOUR : null };
   }
 }

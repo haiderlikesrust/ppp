@@ -9,6 +9,11 @@ export type Settings = {
   /** Fixed split of every on-site fee. The pool gets this share; the rest goes to buyback-and-burn. */
   poolShareBps: number;
   tiers: HolderTier[];
+  /**
+   * Wallets the owner guarantees a tier on packs opened here, whatever they hold. A wallet that holds
+   * enough for a better tier gets that one. Off-site claims still go by holdings.
+   */
+  walletTiers: { wallet: string; tierId: string }[];
   /** Hard cap on any single rebate, on-site or off-site. */
   maxRebateUsd: number;
   /** Hours of continuous holding checked before a pull. 0 = balance at quote and at settlement only. */

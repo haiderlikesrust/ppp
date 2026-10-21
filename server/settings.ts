@@ -10,6 +10,7 @@ export const settingsSchema: z.ZodType<Settings> = z.object({
   feeBps: z.number().int().min(0).max(5_000),
   poolShareBps: bps,
   tiers: z.array(z.object({ id: z.string().min(1).max(16), name: z.string().trim().min(1).max(24), minSupplyPpm: z.number().int().min(1).max(1_000_000), onsiteCoverageBps: bps, offsiteCoverageBps: bps })).min(1).max(8),
+  walletTiers: z.array(z.object({ wallet: z.string().trim().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Enter a Solana wallet address.'), tierId: z.string().min(1).max(16) })).max(100),
   maxRebateUsd: z.number().finite().min(0).max(100_000),
   onsiteHoldHours: z.number().finite().min(0).max(24 * 30),
   offsiteHoldHours: z.number().finite().min(0).max(24 * 30),
