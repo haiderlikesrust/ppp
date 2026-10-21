@@ -55,6 +55,9 @@ test('a tier exception lets a wallet open packs at its tier whatever it holds; a
 
   const { order } = await s.orders.create(granted.wallet, 'pokemon_50');
   assert.equal(order.coverageBps, 10_000, 'quoted at the granted Whale tier with no holdings');
+  assert.deepEqual([order.feeUsd, order.totalUsd], [0, 50], 'exception wallets pay no protection fee');
+  assert.equal((await s.orders.quotes(granted.wallet)).find(p => p.code === 'pokemon_50')?.quote.feeMicros, 0);
+  assert.equal((await s.orders.quotes(other.wallet)).find(p => p.code === 'pokemon_50')?.quote.feeMicros, 5_000_000, 'and only them');
   await s.orders.pay(granted.wallet, order.id, 'practice');
   const done = await settle(s, order.id);
   assert.equal(done.status, 'complete');

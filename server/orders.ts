@@ -65,13 +65,19 @@ type Row = { id: string; wallet: string; status: OrderStatus; price_micros: stri
 export class Orders {
   constructor(readonly db: Database, readonly jobs: Jobs, readonly solana: Solana, readonly packs: PackProvider, readonly holders: Holders, readonly pool: Pool, readonly settings: SettingsStore, readonly gas: Gas) {}
 
+  /** The settings a wallet buys on: tier exception wallets pay no protection fee. */
+  private terms(wallet: string | null) {
+    const s = this.settings.current;
+    return wallet && s.walletTiers.some(e => e.wallet === wallet) ? { ...s, feeBps: 0 } : s;
+  }
+
   /** A personalized quote for every available pack. */
   async quotes(wallet: string | null) {
     const machines = await this.packs.machines();
     const tier = wallet ? (await this.holders.onsiteTier(wallet, { fresh: false })).tier : null;
-    const free = await this.pool.free();
+    const free = await this.pool.free(), terms = this.terms(wallet);
     return machines.map(m => {
-      const q = quote(m.priceUsd, tier, this.settings.current, free, m.code);
+      const q = quote(m.priceUsd, tier, terms, free, m.code);
       // Before mainnet is enabled nothing can be bought, so nothing is offered as protected.
       return { code: m.code, priceUsd: m.priceUsd, quote: this.solana.canSpend ? q : { ...q, protected: false, coverageBps: 0, maxRebateMicros: 0, reason: 'Protected packs open at launch.' } };
     });
@@ -100,7 +106,7 @@ export class Orders {
     const def = packDef(code);
     if (!def) throw new Error('That pack is not available here.');
     const priceUsd = def.priceUsd;
-    const s = this.settings.current;
+    const s = this.terms(wallet);
     if (!this.solana.canSpend) throw new Error('Protected packs open at launch. Nothing was charged.');
     if (s.paused) throw new Error('Protected packs are paused right now.');
     // OPS signs every step after payment; never take money it could not act on right away.
@@ -122,7 +128,7 @@ export class Orders {
       // A cancelled unpaid order no longer blocks a new one; it still settles if a payment lands before it expires.
       const waiting = (await this.db.query<Row>("SELECT * FROM orders WHERE wallet=$1 AND status IN ('awaiting_payment','paying') AND NOT COALESCE((data->>'cancelled')::boolean, FALSE)", [wallet])).rows[0];
       if (waiting) throw Object.assign(new Error('Finish or let your current order expire before starting another.'), { statusCode: 409 });
-      const q = quote(priceUsd, check.tier, this.settings.current, await this.pool.free(), code);
+      const q = quote(priceUsd, check.tier, this.terms(wallet), await this.pool.free(), code);
       if (!q.protected) throw new Error(q.reason ?? 'This pack cannot be protected right now.');
       if (q.totalMicros !== first.totalMicros || q.coverageBps !== first.coverageBps) throw new Error('The price or coverage just changed. Please try again.');
       const now = Date.now();

@@ -154,7 +154,7 @@ export function OpenPage() {
 
     {/* Packs */}
     <section id="packs" className="scroll-mt-32 pb-16">
-      <SectionTitle title="Choose a pack" sub={`One graded Pokémon card or luxury watch per pack, straight from Collector Crypt. Prices include the ${pct(feeBps)} protection fee.`} />
+      <SectionTitle title="Choose a pack" sub={`One graded Pokémon card or luxury watch per pack, straight from Collector Crypt.${packs?.length && packs.every(p => p.quote.feeMicros === 0) ? '' : ` Prices include the ${pct(feeBps)} protection fee.`}`} />
       {packs && (['pokemon', 'watch'] as const).map(kind => {
         const list = packs.filter(p => (packDef(p.code)?.kind ?? 'pokemon') === kind);
         return list.length ? <div key={kind} className="mb-12">
@@ -315,7 +315,7 @@ function PackTile({ pack, signedIn, busy, waitMs, onOpen }: { pack: Pack; signed
     <Booster code={pack.code} priceUsd={pack.priceUsd} />
     <div className="mt-4 flex flex-wrap items-baseline justify-between gap-x-2">
       <span className="pixel num text-lg">{money(q.totalMicros / 1e6)}</span>
-      <span className="text-[11px] text-muted">incl. {money(q.feeMicros / 1e6)} fee</span>
+      {q.feeMicros > 0 && <span className="text-[11px] text-muted">incl. {money(q.feeMicros / 1e6)} fee</span>}
     </div>
     <div className="mt-1 min-h-10 text-sm">
       {q.protected ? <span className="text-gain">Up to <b className="num">{money(q.maxRebateMicros / 1e6)}</b> back · {pct(q.coverageBps)}</span>
