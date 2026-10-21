@@ -100,7 +100,7 @@ export function App() {
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm sm:px-6 md:grid-cols-[1.2fr_1fr_1.6fr]">
         <div className="min-w-0">
           <Link href="/" className="flex items-center gap-2.5"><Logo size={24} /><Wordmark size="text-base" /></Link>
-          <p className="mt-3 text-muted">Bad pull? Pull back. Loss rebates on Collector Crypt packs, Pokémon cards and watches, paid in USDC on Solana.</p>
+          <p className="mt-3 text-muted">Bad pull? Pull back. Loss rebates on Collector Crypt packs, Pokémon cards, sports cards and watches, paid in USDC on Solana.</p>
         </div>
         <div className="grid content-start gap-2">
           <div className="label">Explore</div>

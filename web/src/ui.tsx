@@ -19,8 +19,8 @@ export function Wordmark({ size = 'text-lg' }: { size?: string }) {
   return <span className={`pixel ${size} font-bold tracking-[0.06em]`}>PULLBACK</span>;
 }
 
-/** Each Collector Crypt machine wears a Pokémon type: card packs by price, the watch pack as Steel. */
-export type PackType = 'grass' | 'water' | 'fire' | 'fairy' | 'dragon' | 'psychic' | 'steel';
+/** Each Collector Crypt machine wears a Pokémon type (card packs by price, the watch pack as Steel); sports packs wear their ball. */
+export type PackType = 'grass' | 'water' | 'fire' | 'fairy' | 'dragon' | 'psychic' | 'steel' | 'basketball' | 'baseball' | 'football' | 'soccer' | 'trophy';
 type PackStyle = { name: string; type: PackType; color: string; item: string };
 export const PACKS: Record<string, PackStyle> = {
   pokemon_25: { name: 'Grass', type: 'grass', color: '#45d483', item: 'graded card' },
@@ -30,6 +30,17 @@ export const PACKS: Record<string, PackStyle> = {
   pokemon_250: { name: 'Dragon', type: 'dragon', color: '#7b6cf6', item: 'graded card' },
   pokemon_500: { name: 'Psychic', type: 'psychic', color: '#c77dff', item: 'graded card' },
   ewatches_500: { name: 'Watch', type: 'steel', color: '#d9dee6', item: 'luxury watch' },
+  soccer_50: { name: 'Soccer', type: 'soccer', color: '#2fb37a', item: 'graded card' },
+  sports_100: { name: 'Multi-Sport', type: 'trophy', color: '#5c8dff', item: 'graded card' },
+  basketball_100: { name: 'Basketball', type: 'basketball', color: '#f2803a', item: 'graded card' },
+  baseball_100: { name: 'Baseball', type: 'baseball', color: '#e5484d', item: 'graded card' },
+  football_100: { name: 'Football', type: 'football', color: '#b07a4a', item: 'graded card' },
+  soccer_100: { name: 'Soccer', type: 'soccer', color: '#2fb37a', item: 'graded card' },
+  basketball_250: { name: 'Basketball', type: 'basketball', color: '#f2803a', item: 'graded card' },
+  baseball_250: { name: 'Baseball', type: 'baseball', color: '#e5484d', item: 'graded card' },
+  football_250: { name: 'Football', type: 'football', color: '#b07a4a', item: 'graded card' },
+  soccer_250: { name: 'Soccer', type: 'soccer', color: '#2fb37a', item: 'graded card' },
+  sports_500: { name: 'All-Star', type: 'trophy', color: '#e8c46a', item: 'graded card' },
   // Collector Crypt calls these watch machines, but they pay out graded cards.
   ewatch_250: { name: 'Steel', type: 'steel', color: '#9fb0c4', item: 'graded card' },
   ewatch_500: { name: 'Gold', type: 'steel', color: '#e2b85c', item: 'graded card' },
@@ -46,6 +57,11 @@ const ENERGY: Record<PackType, ReactNode> = {
   fairy: <><path d="M12 2.5l2.4 7.1 7.1 2.4-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4Z" fill="currentColor" /><circle cx="19" cy="5" r="1.6" fill="currentColor" /></>,
   dragon: <path d="M3.5 20.5c2.2-5 2-9.7-.4-14.2 3.5 1.3 6 3.5 7.4 6.6.9-4.4 4-7.7 9.4-9.4-1.8 3.8-2.1 7.4-.8 10.9-2.5-.9-4.9-.6-7.1.9-2.6 1.8-5.4 3.5-8.5 5.2Z" fill="currentColor" />,
   psychic: <><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12Z" fill="none" stroke="currentColor" strokeWidth="2.2" /><circle cx="12" cy="12" r="2.8" fill="currentColor" /></>,
+  basketball: <><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" /><path d="M3 12h18M12 3v18M5.6 5.6c3 2.6 3 10.2 0 12.8M18.4 5.6c-3 2.6-3 10.2 0 12.8" fill="none" stroke="currentColor" strokeWidth="1.6" /></>,
+  baseball: <><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" /><path d="M7.5 4.4c2 2.2 2 13 0 15.2M16.5 4.4c-2 2.2-2 13 0 15.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeDasharray="2 1.6" /></>,
+  football: <><ellipse cx="12" cy="12" rx="10" ry="6.2" transform="rotate(-35 12 12)" fill="currentColor" /><path d="M9.2 14.8l5.6-5.6M10.4 11.2l1.6 1.6M12 9.6l1.6 1.6M8.8 12.8l1.6 1.6" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></>,
+  soccer: <><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" /><path d="M12 8.2l3.6 2.6-1.4 4.2H9.8L8.4 10.8Z" fill="currentColor" /><path d="M12 8.2V3.3M15.6 10.8l4.6-1.5M14.2 15l2.8 4M9.8 15 7 19M8.4 10.8 3.8 9.3" stroke="currentColor" strokeWidth="1.4" /></>,
+  trophy: <><path d="M7 3.5h10v5a5 5 0 0 1-10 0Z" fill="currentColor" /><path d="M7 5.5H3.8c0 3 1.4 4.6 3.6 4.9M17 5.5h3.2c0 3-1.4 4.6-3.6 4.9" fill="none" stroke="currentColor" strokeWidth="1.8" /><rect x="10.8" y="13" width="2.4" height="4.5" fill="currentColor" /><rect x="7.5" y="17.5" width="9" height="3" rx="1" fill="currentColor" /></>,
   steel: <><rect x="8.5" y="1.5" width="7" height="4" rx="1" fill="currentColor" /><rect x="8.5" y="18.5" width="7" height="4" rx="1" fill="currentColor" /><circle cx="12" cy="12" r="6.6" fill="none" stroke="currentColor" strokeWidth="2.2" /><path d="M12 8.6V12l2.6 1.6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></>,
 };
 export function Energy({ type, className = '', style }: { type: PackType; className?: string; style?: CSSProperties }) {

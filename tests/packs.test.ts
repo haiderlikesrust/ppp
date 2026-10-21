@@ -11,7 +11,7 @@ import { packDef } from '../shared/packs';
 test('packs are sold and settled by machine code, so two machines can share a price', async () => {
   const s = await setup(), { wallet } = await user(s);
   const quotes = await s.orders.quotes(wallet);
-  assert.equal(quotes.filter(q => q.priceUsd === 500).length, 3, '$500 is Psychic, Gold and the watch pack');
+  assert.equal(quotes.filter(q => q.priceUsd === 500).length, 4, '$500 is Psychic, Gold, All-Star and the watch pack');
   const { order } = await s.orders.create(wallet, 'ewatch_500');
   assert.equal(order.packCode, 'ewatch_500');
   await s.orders.pay(wallet, order.id, 'practice');
@@ -33,6 +33,18 @@ test('Legendary $250, the WATCH card packs and Watch $500 are on sale; 151 & Fri
   const { order } = await s.orders.create(wallet, 'ewatches_500');
   await s.orders.pay(wallet, order.id, 'practice');
   assert.match((await settle(s, order.id)).card!.name, /Box & papers/, 'the watch pack pays out a watch');
+  await s.db.close();
+});
+
+test('sports packs are on sale in their own kind and pay out graded sports cards', async () => {
+  const s = await setup(), { wallet } = await user(s);
+  const codes = (await s.orders.quotes(wallet)).map(q => q.code);
+  const sports = ['soccer_50', 'sports_100', 'basketball_100', 'baseball_100', 'football_100', 'soccer_100', 'basketball_250', 'baseball_250', 'football_250', 'soccer_250', 'sports_500'];
+  assert.ok(sports.every(c => codes.includes(c) && packDef(c)?.kind === 'sports'));
+  assert.ok(!codes.includes('basketball_50'), 'hidden on Collector Crypt, with no machine image');
+  const { order } = await s.orders.create(wallet, 'basketball_100');
+  await s.orders.pay(wallet, order.id, 'practice');
+  assert.match((await settle(s, order.id)).card!.name, /Panini|Topps|Bowman|Donruss/);
   await s.db.close();
 });
 
