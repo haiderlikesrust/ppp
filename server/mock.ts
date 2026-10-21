@@ -6,7 +6,7 @@ import { buildPayment, validateSignedPayment, type PaymentIntent } from './payme
 import { PendingOperation } from './jobs';
 import type { BuiltPayment, CcPayment, PackMachine, PackProvider, PaymentState, PurchaseResult, Solana } from './ports';
 import type { Settings } from '../shared/types';
-import { PACK_CATALOG } from '../shared/packs';
+import { SELLING, packDef } from '../shared/packs';
 
 const fakeSignature = () => bs58.encode(randomBytes(64));
 const fakeAddress = () => Keypair.generate().publicKey.toBase58();
@@ -174,7 +174,7 @@ export class MockPacks implements PackProvider {
   readonly sold = new Set<string>();
   constructor(readonly ops: () => string) {}
 
-  async machines(): Promise<PackMachine[]> { return PACK_CATALOG.filter(p => !this.soldOut.has(p.priceUsd)).map(p => ({ priceUsd: p.priceUsd, code: p.code })); }
+  async machines(): Promise<PackMachine[]> { return SELLING.filter(p => !this.soldOut.has(p.priceUsd)).map(p => ({ priceUsd: p.priceUsd, code: p.code })); }
 
   async buy(purchaseId: string, code: string, priceUsd: number): Promise<PurchaseResult> {
     const entry = this.purchases.get(purchaseId) ?? { calls: 0 };
@@ -195,7 +195,7 @@ export class MockPacks implements PackProvider {
 
   card(seed: string, priceUsd: number, code = `pokemon_${priceUsd}`) {
     const rand = seeded(seed), value = Math.round(priceUsd * mockValueRatio(rand) * 100) / 100;
-    const watch = code.startsWith('ewatch'), pick = (list: string[]) => list[Math.floor(rand() * list.length)];
+    const watch = packDef(code)?.kind === 'watch', pick = (list: string[]) => list[Math.floor(rand() * list.length)];
     const name = watch ? pick(WATCHES) : pick(NAMES), set = watch ? pick(MAKERS) : pick(SETS), grade = watch ? 'Box & papers' : `PSA ${7 + Math.floor(rand() * 4)}`;
     return { mint: new PublicKey(createHash('sha256').update(`mint:${seed}`).digest()).toBase58(), name: `${name} · ${set} · ${grade}`, image: null, insuredValueUsd: value, rarity: value >= priceUsd * 1.4 ? 'Epic' : value >= priceUsd ? 'Rare' : 'Common', transferSignature: null };
   }

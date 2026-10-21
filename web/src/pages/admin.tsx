@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, Trash2 } from 'lucide-react';
 import type { Settings } from '../../../shared/types';
 import { requiredFeeBps } from '../../../shared/protection';
-import { PACK_CATALOG } from '../../../shared/packs';
+import { SELLING } from '../../../shared/packs';
 import { api, money, pct } from '../api';
 import { useApp } from '../app';
 import { Empty, SectionTitle, packStyle } from '../ui';
@@ -114,7 +114,7 @@ export function AdminPage() {
       </div>
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <span className="label mr-2">Pack prices</span>
-        {PACK_CATALOG.map(({ code, priceUsd }) => { const paused = form.pausedPacks.includes(code); return <button key={code} className={`tag h-8 border px-3 ${paused ? 'border-loss bg-loss-soft text-loss' : 'border-line'}`} onClick={() => set('pausedPacks', paused ? form.pausedPacks.filter(x => x !== code) : [...form.pausedPacks, code])}>
+        {SELLING.map(({ code, priceUsd }) => { const paused = form.pausedPacks.includes(code); return <button key={code} className={`tag h-8 border px-3 ${paused ? 'border-loss bg-loss-soft text-loss' : 'border-line'}`} onClick={() => set('pausedPacks', paused ? form.pausedPacks.filter(x => x !== code) : [...form.pausedPacks, code])}>
           <i className="size-2" style={{ background: packStyle(code, priceUsd).color }} />{packStyle(code, priceUsd).name} ${priceUsd} {paused ? 'paused' : 'live'}</button>; })}
         <span className="ml-auto"><Toggle checked={form.paused} onChange={v => set('paused', v)} label="Pause all spending" danger /></span>
       </div>

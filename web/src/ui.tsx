@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode 
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { Card } from '../../shared/types';
+import { packDef } from '../../shared/packs';
 import { money } from './api';
 import { useShowcase } from './showcase';
 
@@ -18,25 +19,32 @@ export function Wordmark({ size = 'text-lg' }: { size?: string }) {
   return <span className={`pixel ${size} font-bold tracking-[0.06em]`}>PULLBACK</span>;
 }
 
-/** Each Collector Crypt machine wears a Pokémon type: card packs by price, watch packs as Steel. */
-export type PackType = 'grass' | 'water' | 'fire' | 'psychic' | 'steel';
+/** Each Collector Crypt machine wears a Pokémon type: card packs by price, the watch pack as Steel. */
+export type PackType = 'grass' | 'water' | 'fire' | 'fairy' | 'dragon' | 'psychic' | 'steel';
 type PackStyle = { name: string; type: PackType; color: string; item: string };
 export const PACKS: Record<string, PackStyle> = {
   pokemon_25: { name: 'Grass', type: 'grass', color: '#45d483', item: 'graded card' },
   pokemon_50: { name: 'Water', type: 'water', color: '#4aa3ff', item: 'graded card' },
   pokemon_100: { name: 'Fire', type: 'fire', color: '#ff8a4c', item: 'graded card' },
+  pokemon_151: { name: 'Fairy', type: 'fairy', color: '#ff7eb6', item: 'graded card' },
+  pokemon_250: { name: 'Dragon', type: 'dragon', color: '#7b6cf6', item: 'graded card' },
   pokemon_500: { name: 'Psychic', type: 'psychic', color: '#c77dff', item: 'graded card' },
-  ewatch_250: { name: 'Steel', type: 'steel', color: '#9fb0c4', item: 'luxury watch' },
-  ewatch_500: { name: 'Gold', type: 'steel', color: '#e2b85c', item: 'luxury watch' },
+  ewatches_500: { name: 'Steel', type: 'steel', color: '#9fb0c4', item: 'luxury watch' },
+  // Retired: sold as watch packs, but they paid out graded cards.
+  ewatch_250: { name: 'Steel', type: 'steel', color: '#9fb0c4', item: 'graded card' },
+  ewatch_500: { name: 'Gold', type: 'steel', color: '#e2b85c', item: 'graded card' },
 };
 /** Styling by machine code. Records from before codes existed only carry a price, and were Pokémon packs. */
 export const packStyle = (code: string | null | undefined, priceUsd?: number): PackStyle => PACKS[code ?? ''] ?? PACKS[`pokemon_${priceUsd}`] ?? { name: 'Mystery', type: 'psychic', color: '#8a93a3', item: 'collectible' };
-export const isWatch = (code: string | null | undefined) => packStyle(code).type === 'steel';
+/** Whether the machine pays out watches (shown in watch frames), going by what it actually pays. */
+export const isWatch = (code: string | null | undefined) => packDef(code)?.kind === 'watch';
 
 const ENERGY: Record<PackType, ReactNode> = {
   grass: <path d="M5 19C5 10.5 10 5.5 19 5c-.5 9-5.5 14-14 14Zm0 0 8-8" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />,
   water: <path d="M12 3c4.2 5 6.3 8.6 6.3 11.2a6.3 6.3 0 0 1-12.6 0C5.7 11.6 7.8 8 12 3Z" fill="currentColor" />,
   fire: <path d="M12.2 2.5c.9 3.2 5.3 5.4 5.3 10.6a5.5 5.5 0 0 1-11 0c0-2.3 1-3.9 2.2-5 .3 2 1.3 3.2 2.6 3.7-.7-3.3-.3-6.4.9-9.3Z" fill="currentColor" />,
+  fairy: <><path d="M12 2.5l2.4 7.1 7.1 2.4-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4Z" fill="currentColor" /><circle cx="19" cy="5" r="1.6" fill="currentColor" /></>,
+  dragon: <path d="M3.5 20.5c2.2-5 2-9.7-.4-14.2 3.5 1.3 6 3.5 7.4 6.6.9-4.4 4-7.7 9.4-9.4-1.8 3.8-2.1 7.4-.8 10.9-2.5-.9-4.9-.6-7.1.9-2.6 1.8-5.4 3.5-8.5 5.2Z" fill="currentColor" />,
   psychic: <><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12Z" fill="none" stroke="currentColor" strokeWidth="2.2" /><circle cx="12" cy="12" r="2.8" fill="currentColor" /></>,
   steel: <><rect x="8.5" y="1.5" width="7" height="4" rx="1" fill="currentColor" /><rect x="8.5" y="18.5" width="7" height="4" rx="1" fill="currentColor" /><circle cx="12" cy="12" r="6.6" fill="none" stroke="currentColor" strokeWidth="2.2" /><path d="M12 8.6V12l2.6 1.6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></>,
 };

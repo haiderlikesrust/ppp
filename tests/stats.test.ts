@@ -5,6 +5,7 @@ import { HIT_MULTIPLE, PullFeed, SAMPLE_PER_PACK } from '../server/pull-feed';
 import { leaderboard, sitePulls, weekStart, WEEK } from '../server/leaderboard';
 import { createApp } from '../server/app';
 import { distribution, micros } from '../shared/protection';
+import { SELLING } from '../shared/packs';
 
 const HOUR = 3_600_000, DAY = 24 * HOUR;
 
@@ -36,7 +37,7 @@ test('the pull feed stores each pull once and keeps the newest, with photos, for
   assert.equal(await feed.poll(now), 3, 'entries without a value, or for another machine, are skipped');
   assert.equal(await feed.poll(now), 0, 'a second read of the same feed adds nothing');
   assert.ok(calls.every(u => u.startsWith('https://gacha.collectorcrypt.com/api/getAllWinners?count=200&packType=')));
-  assert.equal(calls.length, 12, 'every machine is read on every poll');
+  assert.equal(calls.length, SELLING.length * 2, 'every machine on sale is read on every poll');
 
   const recent = feed.recent();
   assert.deepEqual(recent.map(p => p.valueUsd), [22, 140, 31], 'newest first');
@@ -173,7 +174,7 @@ test('the stats, recent pulls and leaderboard routes answer for anyone', async (
   await feed.poll(now);
   const { app } = await createApp({ services: { ...s, feed }, timers: false, logger: false });
   const stats = (await app.inject({ url: '/api/stats' })).json();
-  assert.equal(stats.packs.length, 6);
+  assert.equal(stats.packs.length, SELLING.length);
   assert.equal(stats.packs.find((p: { code: string }) => p.code === 'pokemon_25').best.valueUsd, 60);
   const recent = (await app.inject({ url: '/api/pulls/recent' })).json().items[0];
   assert.deepEqual([recent.valueUsd, recent.mint], [60, `mint-pokemon_25-${now}-60`], 'each pull carries its NFT, to look it up on-chain');

@@ -6,19 +6,32 @@ import { openDatabase } from '../server/db';
 import { SettingsStore } from '../server/settings';
 import { migrate } from '../server/db';
 import { fromWinner, pickExample, toCard } from '../server/showcase';
+import { packDef } from '../shared/packs';
 
 test('watch packs are on sale and settle like Pokémon packs, keyed by machine code', async () => {
   const s = await setup(), { wallet } = await user(s);
   const quotes = await s.orders.quotes(wallet);
-  assert.ok(quotes.some(q => q.code === 'ewatch_250') && quotes.some(q => q.code === 'ewatch_500'), 'watch machines are offered');
+  assert.ok(quotes.some(q => q.code === 'ewatches_500'), 'the machine that pays watches is offered');
   assert.equal(quotes.filter(q => q.priceUsd === 500).length, 2, '$500 is both a Pokémon and a watch pack');
-  const { order } = await s.orders.create(wallet, 'ewatch_250');
-  assert.equal(order.packCode, 'ewatch_250');
+  const { order } = await s.orders.create(wallet, 'ewatches_500');
+  assert.equal(order.packCode, 'ewatches_500');
   await s.orders.pay(wallet, order.id, 'practice');
   const done = await settle(s, order.id);
   assert.equal(done.status, 'complete');
   assert.match(done.card!.name, /Box & papers/);
   await assert.rejects(s.orders.create(wallet, 'sealed_80'), /not available here/);
+  await s.db.close();
+});
+
+test('Legendary $250 and 151 & Friends are on sale; the old watch machines are retired but still known', async () => {
+  const s = await setup(), { wallet } = await user(s);
+  const codes = (await s.orders.quotes(wallet)).map(q => q.code);
+  assert.ok(codes.includes('pokemon_250') && codes.includes('pokemon_151'));
+  assert.ok(!codes.includes('ewatch_250') && !codes.includes('ewatch_500'), 'they paid Pokémon cards, not watches');
+  await assert.rejects(s.orders.create(wallet, 'ewatch_250'), /not available right now/);
+  assert.equal(packDef('ewatch_500')?.priceUsd, 500, 'past orders and claims still read');
+  const { order } = await s.orders.create(wallet, 'pokemon_151');
+  assert.deepEqual([order.priceUsd, order.totalUsd], [151, 166.1]);
   await s.db.close();
 });
 
@@ -40,7 +53,7 @@ test('pausing a $500 Pokémon pack leaves the $500 watch pack on sale', async ()
   const s = await setup({ pausedPacks: ['pokemon_500'] }), { wallet } = await user(s, 20_000);
   const quotes = await s.orders.quotes(wallet);
   assert.equal(quotes.find(q => q.code === 'pokemon_500')!.quote.protected, false);
-  assert.equal(quotes.find(q => q.code === 'ewatch_500')!.quote.protected, true);
+  assert.equal(quotes.find(q => q.code === 'ewatches_500')!.quote.protected, true);
   await s.db.close();
 });
 

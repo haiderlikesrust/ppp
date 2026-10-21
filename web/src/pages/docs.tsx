@@ -65,7 +65,7 @@ export function DocsPage() {
       <Entry n={2} id="math" title="The rebate math">
         <div className="pixel not-prose my-6 rounded-[10px] border border-volt/40 bg-volt-soft px-6 py-5 text-center text-base text-volt sm:text-lg">rebate = coverage × (pack price − card value)</div>
         <ul>
-          <li><b>Pack price</b> is what the pack costs on Collector Crypt: $25 to $500 for Pokémon cards, $250 or $500 for watches. The protection fee isn't part of it.</li>
+          <li><b>Pack price</b> is what the pack costs on Collector Crypt: $25 to $500 for Pokémon cards, $500 for watches. The protection fee isn't part of it.</li>
           <li><b>Card value</b> is the insured value Collector Crypt records for the card or watch at the moment it's pulled. Nobody can change it afterwards, including us.</li>
           <li><b>Coverage</b> comes from your tier, and is lower for packs opened elsewhere.</li>
           <li>One rebate is capped at <b>{money(s.maxRebateUsd)}</b>. A card worth the pack price or more needs no rebate.</li>

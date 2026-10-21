@@ -1,6 +1,6 @@
 import { PublicKey, type Connection, type Keypair } from '@solana/web3.js';
 import { CollectorCrypt, machineUnavailable } from './client';
-import { PACK_CATALOG } from '../../shared/packs';
+import { SELLING } from '../../shared/packs';
 import { buyPack } from './purchase';
 import type { PurchaseStore } from './store';
 import type { PackMachine, PackProvider, PurchaseResult } from '../ports';
@@ -31,7 +31,7 @@ export class CollectorCryptPacks implements PackProvider {
     const [catalog, status] = await Promise.all([this.client.machines(), this.client.gachaStatus()]);
     if (status.machineStatus !== 'running') return [];
     return catalog
-      .filter((m: any) => PACK_CATALOG.some(p => p.code === m.code && p.priceUsd === m.price) && m.contains === 1
+      .filter((m: any) => SELLING.some(p => p.code === m.code && p.priceUsd === m.price) && m.contains === 1
         && Object.values(m.stock ?? {}).length > 0 && Object.values(m.stock ?? {}).every((n: any) => Number.isFinite(n) && n > 0)
         && status.gachas?.some((s: any) => s.code === m.code && s.isOpen))
       .map((m: any) => ({ priceUsd: m.price, code: m.code }))

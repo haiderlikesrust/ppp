@@ -1,4 +1,4 @@
-import { PACK_CATALOG, type PackDef } from '../shared/packs';
+import { SELLING, type PackDef } from '../shared/packs';
 import { distribution, maxLiability, micros, rebateMicros, usd } from '../shared/protection';
 import type { FeedPull, PackStats, StatsView } from '../shared/types';
 import type { Database } from './db';
@@ -34,7 +34,7 @@ export class PullFeed {
   async poll(now = Date.now()) {
     let added = 0;
     const seen: FeedPull[] = [];
-    for (const def of PACK_CATALOG) {
+    for (const def of SELLING) {
       const body = await this.json(`/getAllWinners?count=200&packType=${def.code}`).catch(() => null);
       if (!body) continue;
       const entries: unknown[] = Array.isArray(body.data) ? body.data : [];
@@ -65,7 +65,7 @@ export class PullFeed {
   async stats(now = Date.now()): Promise<StatsView> {
     if (this.cache && now - this.cache.at < 60_000) return this.cache.value;
     const s = this.settings.current, packs: PackStats[] = [];
-    for (const def of PACK_CATALOG) {
+    for (const def of SELLING) {
       const rows = (await this.db.query<{ value_cents: number; pulled_at: string }>('SELECT value_cents,pulled_at::text FROM cc_pulls WHERE code=$1 ORDER BY pulled_at DESC LIMIT $2', [def.code, SAMPLE_PER_PACK])).rows;
       const best = (await this.db.query<{ id: string; value_cents: number; pulled_at: string; card: FeedPull['card'] }>('SELECT id,value_cents,pulled_at::text,card FROM cc_pulls WHERE code=$1 AND card IS NOT NULL AND pulled_at>=$2 ORDER BY value_cents DESC, pulled_at DESC LIMIT 1', [def.code, now - 7 * DAY])).rows[0];
       const [d] = distribution(rows.map(r => ({ priceUsd: def.priceUsd, valueUsd: r.value_cents / 100 })));
