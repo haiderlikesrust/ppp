@@ -56,7 +56,7 @@ async function drawCard(canvas: HTMLCanvasElement, p: SitePull) {
   c.restore();
 
   // The result.
-  const x = 520, right = W - 72, regraded = p.rebateUsd > 0, hit = p.valueUsd >= p.priceUsd;
+  const x = 520, right = W - 72, regraded = p.rebateUsd > 0, hit = !regraded && (p.sellUsd ?? p.valueUsd) >= p.priceUsd;
   // The wordmark: the name with its bolt.
   c.font = `700 42px ${DISPLAY}`; c.fillStyle = INK; c.fillText(BRAND.name, x, 96);
   c.save(); c.translate(x + c.measureText(BRAND.name).width + 3, 64); c.scale(1.5, 1.5); c.fillStyle = SPARK; c.fill(new Path2D('M10.2 1 1.5 13.5h5.3L5.4 23l9.1-13.2H9.1L10.2 1Z')); c.restore();
