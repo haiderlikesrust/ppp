@@ -47,7 +47,20 @@ export function holderTier(balance: bigint, supply: bigint, tiers: HolderTier[])
 
 export const supplyPpm = (balance: bigint, supply: bigint) => supply > 0n ? Number(balance * 1_000_000n / supply) : 0;
 
-/** coverage × max(0, price − value), floored to a whole micro and capped. */
+/** How far a live offer may sit below a machine's usual sell-back before it is treated as a bad quote. */
+const LOWEST_TRUSTED_OFFER_BPS = 8_500;
+
+/**
+ * What a card really brings back: Collector Crypt's live sell-back offer when it has one, otherwise the machine's usual
+ * share of the insured value. An offer far from that share is ignored, so one bad quote can't inflate a rebate.
+ */
+export function sellValueMicros(insuredMicros: number, sellBps: number, offerMicros?: number | null) {
+  const usual = bps(insuredMicros, sellBps);
+  if (offerMicros === null || offerMicros === undefined || offerMicros < bps(usual, LOWEST_TRUSTED_OFFER_BPS) || offerMicros > insuredMicros) return usual;
+  return offerMicros;
+}
+
+/** coverage × max(0, price − what the card sells for), floored to a whole micro and capped. */
 export function rebateMicros(priceMicros: number, valueMicros: number, coverageBps: number, capMicros: number) {
   const loss = Math.max(0, priceMicros - Math.max(0, valueMicros));
   return Math.max(0, Math.min(capMicros, bps(loss, coverageBps)));

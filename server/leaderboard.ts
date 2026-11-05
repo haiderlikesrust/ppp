@@ -75,7 +75,7 @@ function toSitePull(r: PullRow): SitePull {
   const d = r.data, name = d.card?.name ? String(d.card.name) : null;
   return {
     id: r.id, code: packCode(d, r.price_micros), priceUsd: usd(Number(r.price_micros)), valueUsd: usd(Number(d.valueMicros)),
-    rebateUsd: usd(Number(d.rebateMicros ?? 0)), at: Number(r.created_at), wallet: short(r.wallet), mint: d.card?.mint ?? null,
+    sellUsd: d.sellMicros === undefined ? null : usd(Number(d.sellMicros)), rebateUsd: usd(Number(d.rebateMicros ?? 0)), at: Number(r.created_at), wallet: short(r.wallet), mint: d.card?.mint ?? null,
     card: name ? { name: name.includes(' · ') ? name : cardTitle(name), image: d.card.image ?? null } : null,
     soldUsd: d.sale ? usd(Number(d.sale.amountMicros)) : null,
     txs: { payment: r.payment_signature, pack: d.packSignature ?? null, card: d.nftSignature ?? null, rebate: d.rebateSignature ?? null, sale: d.sale?.signature ?? null },

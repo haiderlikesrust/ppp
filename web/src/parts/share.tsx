@@ -67,7 +67,7 @@ async function drawCard(canvas: HTMLCanvasElement, p: SitePull) {
   let y = 232 + (title.length - 1) * 68;
   if (set) { c.fillStyle = MUTED; c.font = `600 22px ${BODY}`; c.fillText(wrap(c, set, right - x, 1)[0], x, y + 38); y += 38; }
   y += 66;
-  const rows: [string, string, string][] = [['Pack', money(p.priceUsd), INK], ['Card value', money(p.valueUsd), hit ? GAIN : INK], ...(p.soldUsd !== null ? [['Sold for', money(p.soldUsd), INK] as [string, string, string]] : [])];
+  const rows: [string, string, string][] = [['Pack', money(p.priceUsd), INK], ['Insured value', money(p.valueUsd), INK], ...(p.sellUsd !== null ? [['Sells back for', money(p.sellUsd), hit ? GAIN : INK] as [string, string, string]] : []), ...(p.soldUsd !== null ? [['Sold for', money(p.soldUsd), INK] as [string, string, string]] : [])];
   for (const [label, value, color] of rows) {
     c.fillStyle = MUTED; c.font = `600 24px ${BODY}`; c.fillText(label, x, y);
     c.fillStyle = color; c.textAlign = 'right'; c.font = `600 28px ${DISPLAY}`; c.fillText(value, right, y); c.textAlign = 'left';

@@ -1,4 +1,4 @@
-import { SELLING, type PackDef } from '../shared/packs';
+import { SELLING, sellBpsFor, type PackDef } from '../shared/packs';
 import { distribution, maxLiability, micros, rebateMicros, riskTerms, usd } from '../shared/protection';
 import type { FeedPull, PackRisk, PackStats, StatsView } from '../shared/types';
 import type { Database } from './db';
@@ -69,8 +69,12 @@ export class PullFeed {
       const rows = (await this.db.query<{ value_cents: number; pulled_at: string }>('SELECT value_cents,pulled_at::text FROM cc_pulls WHERE code=$1 ORDER BY pulled_at DESC LIMIT $2', [def.code, SAMPLE_PER_PACK])).rows;
       const best = (await this.db.query<{ id: string; value_cents: number; pulled_at: string; card: FeedPull['card'] }>('SELECT id,value_cents,pulled_at::text,card FROM cc_pulls WHERE code=$1 AND card IS NOT NULL AND pulled_at>=$2 ORDER BY value_cents DESC, pulled_at DESC LIMIT 1', [def.code, now - 7 * DAY])).rows[0];
       const [d] = distribution(rows.map(r => ({ priceUsd: def.priceUsd, valueUsd: r.value_cents / 100 })));
+      // What matters to a buyer is what a card sells back for, so hit rate, risk and rebates all run on that price.
+      const sellBps = sellBpsFor(def.code), [sold] = distribution(rows.map(r => ({ priceUsd: def.priceUsd, valueUsd: r.value_cents / 100 * sellBps / 10_000 })));
+      const bins = Array.from({ length: 20 }, () => 0);
+      for (const r of rows) bins[Math.min(19, Math.floor(r.value_cents / 100 * sellBps / 10_000 / def.priceUsd * 10))]++;
       const price = micros(def.priceUsd), cents = (ratio: number) => Math.round(ratio * def.priceUsd * 100) / 100;
-      const risk = { n: rows.length, expectedLossRatio: d?.expectedLossRatio ?? 0 };
+      const risk = { n: rows.length, expectedLossRatio: sold?.expectedLossRatio ?? 0 };
       const terms = Object.fromEntries(s.tiers.map(t => {
         const priced = riskTerms(t.onsiteCoverageBps, risk, s);
         return [t.id, priced ? { ...priced, riskPriced: true } : { feeBps: s.feeBps, coverageBps: t.onsiteCoverageBps, riskPriced: false }];
@@ -78,13 +82,13 @@ export class PullFeed {
       // The rebate each tier would have got on these exact pulls, with the same coverage and cap a real order has.
       const avgRebateUsd = Object.fromEntries(s.tiers.map(t => {
         const coverage = terms[t.id].coverageBps, cap = maxLiability(price, coverage, micros(s.maxRebateUsd));
-        const total = rows.reduce((sum, r) => sum + rebateMicros(price, r.value_cents * 10_000, coverage, cap), 0);
+        const total = rows.reduce((sum, r) => sum + rebateMicros(price, r.value_cents * sellBps, coverage, cap), 0);
         return [t.id, rows.length ? Math.round(usd(total / rows.length) * 100) / 100 : 0];
       }));
       packs.push({
         code: def.code, priceUsd: def.priceUsd, n: rows.length, since: rows.length ? Number(rows[rows.length - 1].pulled_at) : null,
         medianUsd: d ? cents(d.medianValueRatio) : 0, meanUsd: d ? cents(d.meanValueRatio) : 0, p10Usd: d ? cents(d.p10) : 0, p90Usd: d ? cents(d.p90) : 0,
-        hitRate: d?.hitRate ?? 0, expectedLossRatio: risk.expectedLossRatio, terms, avgRebateUsd,
+        hitRate: sold?.hitRate ?? 0, sellBps, bins, expectedLossRatio: risk.expectedLossRatio, terms, avgRebateUsd,
         best: best ? { id: best.id, mint: best.id.split(':')[0], code: def.code, priceUsd: def.priceUsd, valueUsd: best.value_cents / 100, at: Number(best.pulled_at), card: best.card, onSite: false } : null,
       });
     }

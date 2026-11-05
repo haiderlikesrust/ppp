@@ -2,11 +2,11 @@
 
 Every pack gets a second grade. A loss rebate for people who hold our pump.fun coin and open Collector Crypt Pokémon packs. The name, tagline and origin live in [shared/brand.ts](shared/brand.ts).
 
-- **On-site packs.** You pay the pack price plus a protection fee in one USDC payment. Our OPS wallet buys and opens the pack on Collector Crypt and sends you the card. If the card's insured value is below the pack price, the POOL wallet pays `coverage% × (price − value)` straight away.
+- **On-site packs.** You pay the pack price plus a protection fee in one USDC payment. Our OPS wallet buys and opens the pack on Collector Crypt and sends you the card. If the card sells back for less than the pack price, the POOL wallet pays `coverage% × (price − sell-back offer)` straight away. The sell-back offer is Collector Crypt's live quote, usually 85–93% of insured value depending on the machine.
 - **Risk-priced fees.** Each pack's fee and coverage come from its own recent pulls, so the pool expects to collect more than it pays out on every pack, at every tier. See [The economics](#the-economics-read-this).
 - **Cash out.** Sell one card or a whole batch back to Collector Crypt with one wallet approval. The sale and the rebate show as one total.
 - **Portfolio and share cards.** Every pull with its net result, off-site packs with their claim window counting down, and a public page and share image for each pull.
-- **Off-site packs.** You connect the wallet that opened a pack on Collector Crypt. We find your own payment on-chain, check Collector Crypt's record of the card it sent you, and pay a smaller share of the loss. You keep the card. Each pack can be claimed once.
+- **Off-site packs.** You connect the wallet that opened a pack on Collector Crypt. We find your own payment on-chain, check Collector Crypt's record of the card it sent you, and pay a smaller share of the gap to its sell-back price. You keep the card. Each pack can be claimed once.
 - **Funding.** Creator fees from the coin ($CARDS or SOL) are swapped to USDC for the pool. Each protection fee is split by a fixed percentage: one part goes to the pool, the rest to buyback-and-burn of the coin.
 
 The UI calls this a "rebate", not "insurance" (insurance is a regulated term). Get legal advice before launch.
@@ -30,7 +30,7 @@ With no `.env`, the app runs in **practice mode**: Solana balances are kept in m
 No keys or money are involved.
 
 ```bash
-npm test          # 129 tests: math, pricing, payment validation, history parsing, tiers, orders, claims, portfolio, sharing, treasury
+npm test          # 137 tests: math, pricing, payment validation, history parsing, tiers, orders, claims, portfolio, sharing, treasury
 npm run typecheck
 npm run build     # builds the frontend into dist/, which the API server then serves
 ```
@@ -55,7 +55,7 @@ Production runs on Dokploy as a Docker Compose stack: an Nginx gateway serving t
 
 ## The economics: read this
 
-Big hits don't offset bad pulls, so the pool's cost per pack is `coverage × E[max(0, price − value)]`. That can be large even when packs are fair on average.
+Big hits don't offset bad pulls, so the pool's cost per pack is `coverage × E[max(0, price − sell-back price)]`. That can be large even when packs are fair on average.
 - **Example:** if the expected loss is 25% of price, 50% coverage costs 12.5% of each pack.
 - A 10% fee split 50/50 only puts 5% in the pool. The other 7.5% must come from creator fees. Otherwise more on-site volume drains the pool *faster*.
 

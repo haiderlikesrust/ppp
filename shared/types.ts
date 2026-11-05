@@ -86,7 +86,10 @@ export type OrderStatus = 'awaiting_payment' | 'paying' | 'paid' | 'buying' | 'd
 
 export type OrderView = {
   id: string; status: OrderStatus; wallet: string; packCode: string; priceUsd: number; feeUsd: number; totalUsd: number;
-  coverageBps: number; maxRebateUsd: number; card: Card | null; valueUsd: number | null; rebateUsd: number | null;
+  coverageBps: number; maxRebateUsd: number; card: Card | null; valueUsd: number | null;
+  /** What the card sold back for when the rebate was worked out. The rebate is measured from this, not the insured value. */
+  sellUsd: number | null;
+  rebateUsd: number | null;
   paymentSignature: string | null; rebateSignature: string | null; refundSignature: string | null; nftSignature: string | null;
   message: string | null; createdAt: number;
   /** Set once the card was quick-sold back to Collector Crypt. */
@@ -94,7 +97,7 @@ export type OrderView = {
 };
 
 export type ClaimCandidate = {
-  memo: string; signature: string; packCode: string; priceUsd: number; valueUsd: number | null; pulledAt: number;
+  memo: string; signature: string; packCode: string; priceUsd: number; valueUsd: number | null; sellUsd: number | null; pulledAt: number;
   card: { mint: string; name: string | null; image: string | null } | null;
   eligible: boolean; reason: string | null; coverageBps: number; rebateUsd: number;
   claim: { status: string; rebateUsd: number; signature: string | null } | null;
@@ -123,7 +126,7 @@ export type FeedPull = { id: string; mint: string; code: string; priceUsd: numbe
  * and a quick sale if there was one). The wallet is shortened.
  */
 export type SitePull = {
-  id: string; code: string; priceUsd: number; valueUsd: number; rebateUsd: number; at: number; wallet: string; mint: string | null;
+  id: string; code: string; priceUsd: number; valueUsd: number; sellUsd: number | null; rebateUsd: number; at: number; wallet: string; mint: string | null;
   card: { name: string; image: string | null } | null; soldUsd: number | null;
   txs: { payment: string | null; pack: string | null; card: string | null; rebate: string | null; sale: string | null };
 };
@@ -132,9 +135,13 @@ export type SitePull = {
 export type PackStats = {
   code: string; priceUsd: number; n: number; since: number | null;
   medianUsd: number; meanUsd: number; p10Usd: number; p90Usd: number;
-  /** Share of pulls worth at least the pack price. */
+  /** Share of pulls that sell back for at least the pack price. */
   hitRate: number;
-  /** Share of the pack price the average pull falls short by. What the pack costs to protect at 100% coverage. */
+  /** The share of insured value this machine's sell-back pays. */
+  sellBps: number;
+  /** Pulls by sell-back price: 20 equal bins from $0 to twice the pack price. The last bin holds everything above. */
+  bins: number[];
+  /** Share of the pack price the average pull sells back short by. What the pack costs to protect at 100% coverage. */
   expectedLossRatio: number;
   /** What each tier pays and gets on this pack today, by tier id. */
   terms: Record<string, { feeBps: number; coverageBps: number; riskPriced: boolean }>;

@@ -19,7 +19,8 @@ test('happy path: pay, buy, deliver, auto-rebate, fee split, reservation release
   const done = await settle(s, order.id);
   assert.equal(done.status, 'complete', done.message ?? '');
   assert.ok(done.card);
-  const expected = rebateMicros(micros(25), micros(done.valueUsd!), 5_000, micros(12.5));
+  assert.equal(done.sellUsd, Math.round(done.valueUsd! * 0.85 * 1e6) / 1e6, 'the live sell-back offer, not the insured value');
+  const expected = rebateMicros(micros(25), micros(done.sellUsd!), 5_000, micros(12.5));
   assert.equal(micros(done.rebateUsd!), expected);
   assert.equal(await s.pool.reserved(), 0);
   s.pool.invalidate();

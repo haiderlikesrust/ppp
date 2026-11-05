@@ -16,7 +16,7 @@ export function PullPage({ id }: { id: string }) {
   if (!pull) return <div className="grid gap-6 py-16 md:grid-cols-2"><div className="shimmer aspect-[5/7] max-w-xs rounded-xl" /><div className="shimmer h-64 rounded-xl" /></div>;
 
   const [name, set, grade] = (pull.card?.name ?? 'Graded card').split(' · '), style = packStyle(pull.code, pull.priceUsd);
-  const hit = pull.valueUsd >= pull.priceUsd, regraded = pull.rebateUsd > 0;
+  const regraded = pull.rebateUsd > 0, hit = pull.valueUsd >= pull.priceUsd && !regraded;
   return <div className="grid items-center gap-10 py-10 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)] md:gap-16 md:py-20">
     <div className="rise relative mx-auto w-full max-w-[320px]">
       <TradingCard tilt holo={hit} card={{ name: pull.card?.name ?? 'Graded card', image: pull.card?.image ?? null, insuredValueUsd: pull.valueUsd, rarity: null }} watch={isWatch(pull.code)} />
@@ -29,10 +29,11 @@ export function PullPage({ id }: { id: string }) {
       <dl className="mt-7 grid gap-2.5 text-[15px]">
         <div className="leader"><dt className="text-muted">Pack price</dt><dd className="font-display num">{money(pull.priceUsd)}</dd></div>
         <div className="leader"><dt className="text-muted">Insured value</dt><dd className={`font-display num ${hit ? 'text-gain' : ''}`}>{money(pull.valueUsd)}</dd></div>
+        {pull.sellUsd !== null && <div className="leader"><dt className="text-muted">Sells back for</dt><dd className="font-display num">{money(pull.sellUsd)}</dd></div>}
         {regraded && <div className="leader"><dt className="text-muted">Back in USDC</dt><dd className="font-display num text-gain">+{money(pull.rebateUsd)}</dd></div>}
         {pull.soldUsd !== null && <div className="leader"><dt className="text-muted">Sold back for</dt><dd className="font-display num">{money(pull.soldUsd)}</dd></div>}
       </dl>
-      {!hit && <div className="mt-5"><RebateBar priceUsd={pull.priceUsd} valueUsd={pull.valueUsd} rebateUsd={pull.rebateUsd} /></div>}
+      {!hit && <div className="mt-5"><RebateBar priceUsd={pull.priceUsd} valueUsd={pull.sellUsd ?? pull.valueUsd} rebateUsd={pull.rebateUsd} /></div>}
       <div className="mt-6 flex flex-wrap gap-x-4 gap-y-1 text-xs">
         {TXS.filter(([key]) => pull.txs[key]).map(([key, label]) => <a key={key} href={solscan('tx', pull.txs[key]!)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-muted hover:text-accent">{label}<ArrowUpRight size={12} /></a>)}
         {pull.mint && <a href={solscan('token', pull.mint)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-muted hover:text-accent">Card NFT<ArrowUpRight size={12} /></a>}

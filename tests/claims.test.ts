@@ -14,6 +14,14 @@ function pull(s: Awaited<ReturnType<typeof setup>>, wallet: string, loss: boolea
   }
 }
 const losingPull = (s: Awaited<ReturnType<typeof setup>>, wallet: string, hoursAgo = 1) => pull(s, wallet, true, hoursAgo);
+/** A pull that sells back for more than its pack, so it needs no rebate. */
+function sellingPull(s: Awaited<ReturnType<typeof setup>>, wallet: string) {
+  for (;;) {
+    const p = pull(s, wallet, false);
+    if (p.card.insuredValueUsd! * 0.85 >= 25) return p;
+    s.solana.ccPayments.set(wallet, s.solana.ccPayments.get(wallet)!.filter(x => x.memo !== p.memo));
+  }
+}
 /** A pull that lost at least $5, so its rebate reaches a small cap whatever value the card rolled. */
 function bigLoss(s: Awaited<ReturnType<typeof setup>>, wallet: string) {
   for (;;) {
@@ -30,7 +38,7 @@ test('an eligible off-site pull is scanned, claimed and paid at the lower off-si
   assert.equal(candidate.eligible, true, candidate.reason ?? '');
   const collector = DEFAULT_SETTINGS.tiers[1].offsiteCoverageBps;
   assert.equal(candidate.coverageBps, collector, 'Collector off-site coverage at full pool health');
-  assert.equal(micros(candidate.rebateUsd), rebateMicros(micros(25), micros(pull.card.insuredValueUsd!), collector, offsiteRebateCapMicros(DEFAULT_SETTINGS)));
+  assert.equal(micros(candidate.rebateUsd), rebateMicros(micros(25), micros(candidate.sellUsd!), collector, offsiteRebateCapMicros(DEFAULT_SETTINGS)));
   await s.claims.claim(wallet, activatedAt, pull.memo);
   assert.equal(await s.claims.step(), 1);
   assert.equal(await s.solana.usdcBalance(wallet), BigInt(micros(candidate.rebateUsd)));
@@ -111,13 +119,13 @@ test('refunded packs, winning pulls and old pulls are rejected', async () => {
   const record = await s.packs.status(refunded.memo);
   s.packs.setRecord(refunded.memo, { ...record, pack: { ...record.pack, refunded: true } });
   const old = losingPull(s, wallet, 24 * 3);
-  pull(s, wallet, false);
+  sellingPull(s, wallet);
   const candidates = await s.claims.scan(wallet, activatedAt);
   assert.equal(candidates.length, 2, 'pulls outside the claim window are not even scanned');
   assert.ok(!candidates.some(c => c.memo === old.memo));
   const reasons = candidates.map(c => c.reason);
   assert.ok(reasons.some(r => /refunded/.test(r!)));
-  assert.ok(reasons.some(r => /worth at least/.test(r!)));
+  assert.ok(reasons.some(r => /sells back for at least/.test(r!)));
   assert.ok(candidates.every(c => !c.eligible), 'nothing eligible');
   await s.db.close();
 });

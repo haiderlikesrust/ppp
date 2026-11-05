@@ -63,10 +63,12 @@ test('pack stats use the calibration math and price each tier with the same reba
   assert.equal(p.medianUsd, d.medianValueRatio * 50);
   assert.equal(p.p10Usd, d.p10 * 50);
   assert.equal(p.p90Usd, d.p90 * 50);
-  assert.equal(p.hitRate, d.hitRate);
+  const sold = [...values, 900].map(v => v * 0.85), [ds] = distribution(sold.map(v => ({ priceUsd: 50, valueUsd: v })));
+  assert.equal(p.hitRate, ds.hitRate, 'a hit is a card that sells back for the pack, on an 85% machine');
   assert.equal(p.meanUsd, Math.round(d.meanValueRatio * 50 * 100) / 100);
-  // Shortfalls 40 + 30 + 10 = 80 over 7 pulls: Whale (100%) gets 80/7, the bottom tier (25%) a quarter of it.
-  assert.deepEqual(p.avgRebateUsd, { t1: 2.86, t2: 5.71, t3: 11.43 });
+  // Shortfalls run on sell-back prices. Full coverage gets the average gap, and the bottom tier (25%) a quarter of it.
+  const gap = sold.reduce((sum, v) => sum + Math.max(0, 50 - v), 0) / sold.length, cents = (n: number) => Math.round(n * 100) / 100;
+  assert.deepEqual(p.avgRebateUsd, { t1: cents(gap * 0.25), t2: cents(gap * 0.5), t3: cents(gap) });
   assert.equal(p.best?.valueUsd, 120, 'the $900 hit is over a week old, so the best of the last 7 days is $120');
   assert.equal(p.best?.card?.name, 'Psyduck · Mew EN-151 · PSA 10');
 

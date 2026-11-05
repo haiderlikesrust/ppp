@@ -7,7 +7,7 @@ import { sharePage, shareText } from '../server/share';
 import type { SitePull } from '../shared/types';
 
 const pull = (patch: Partial<SitePull> = {}): SitePull => ({
-  id: '7982b2ef-f950-4f35-93d5-d464fa502bb7', code: 'pokemon_25', priceUsd: 25, valueUsd: 9.3, rebateUsd: 3.92, at: 1, wallet: 'AbCd…WxYz', mint: 'mint',
+  id: '7982b2ef-f950-4f35-93d5-d464fa502bb7', code: 'pokemon_25', priceUsd: 25, valueUsd: 9.3, sellUsd: 7.9, rebateUsd: 3.92, at: 1, wallet: 'AbCd…WxYz', mint: 'mint',
   card: { name: 'Sylveon · Crown Zenith · PSA 9', image: 'https://nft.collectorcrypt.com/front/1' }, soldUsd: null, txs: { payment: null, pack: null, card: null, rebate: null, sale: null }, ...patch,
 });
 

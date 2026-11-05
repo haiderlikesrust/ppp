@@ -7,8 +7,7 @@ const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ '&': '&amp;', 
 /** What a shared pull says about itself. */
 export function shareText(p: SitePull) {
   const name = p.card?.name.split(' · ')[0] ?? 'A graded card';
-  const body = p.valueUsd >= p.priceUsd ? `Pulled from a ${money(p.priceUsd)} pack, worth ${money(p.valueUsd)}.`
-    : p.rebateUsd > 0 ? `Pulled from a ${money(p.priceUsd)} pack, worth ${money(p.valueUsd)}. ${money(p.rebateUsd)} came back in USDC.`
+  const body = p.rebateUsd > 0 ? `Pulled from a ${money(p.priceUsd)} pack, worth ${money(p.valueUsd)}. ${money(p.rebateUsd)} came back in USDC.`
     : `Pulled from a ${money(p.priceUsd)} pack, worth ${money(p.valueUsd)}.`;
   return { title: `${name} · ${BRAND.name}`, description: body };
 }

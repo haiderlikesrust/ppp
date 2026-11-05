@@ -249,7 +249,7 @@ export function RebateBar({ priceUsd, valueUsd, rebateUsd }: { priceUsd: number;
       <div className="bg-gain" style={{ width: pct(rebateUsd) }} />
     </div>
     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-      <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-info" />Card {money(valueUsd)}</span>
+      <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-info" />Sells for {money(valueUsd)}</span>
       <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-gain" />Back to you {money(rebateUsd)}</span>
       <span className="flex items-center gap-1.5"><i className="size-2 rounded-full bg-loss/40" />Not covered {money(Math.max(0, priceUsd - value - rebateUsd))}</span>
     </div>

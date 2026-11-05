@@ -6,7 +6,8 @@ import type { Pool } from './pool';
 import type { Runner } from './orders';
 import type { SettingsStore } from './settings';
 import { ccRecordProblem } from './cc/history';
-import { micros, offsiteCoverageBps, offsiteRebateCapMicros, rebateMicros, usd, windowLabel } from '../shared/protection';
+import { micros, offsiteCoverageBps, offsiteRebateCapMicros, rebateMicros, sellValueMicros, usd, windowLabel } from '../shared/protection';
+import { sellBpsFor } from '../shared/packs';
 import type { ClaimCandidate } from '../shared/types';
 
 const HOUR = 3_600_000;
@@ -32,6 +33,19 @@ export class Claims {
     const value = await this.packs.status(memo);
     if (this.statusCache.size > 2_000) this.statusCache.delete(this.statusCache.keys().next().value!);
     this.statusCache.set(memo, { at: Date.now(), value });
+    return value;
+  }
+
+  private offers = new Map<string, { at: number; value: number | null }>();
+
+  /** A card's live sell-back offer, cached so one wallet scan doesn't ask twice. Null when Collector Crypt has none. */
+  private async offer(mint: string | undefined) {
+    if (!mint) return null;
+    const cached = this.offers.get(mint);
+    if (cached && Date.now() - cached.at < 300_000) return cached.value;
+    const quote = await this.packs.buybackQuote(mint).catch(() => null), value = quote?.available ? quote.amountMicros : null;
+    if (this.offers.size > 2_000) this.offers.delete(this.offers.keys().next().value!);
+    this.offers.set(mint, { at: Date.now(), value });
     return value;
   }
 
@@ -72,7 +86,7 @@ export class Claims {
 
   async evaluate(wallet: string, activatedAt: number, p: CcPayment, health?: number, today?: { count: number; nextAt: number | null }): Promise<ClaimCandidate> {
     const s = this.settings.current;
-    const base: ClaimCandidate = { memo: p.memo, signature: p.signature, packCode: `pokemon_${usd(p.priceMicros)}`, priceUsd: usd(p.priceMicros), valueUsd: null, pulledAt: p.blockTime, card: null, eligible: false, reason: null, coverageBps: 0, rebateUsd: 0, claim: null };
+    const base: ClaimCandidate = { memo: p.memo, signature: p.signature, packCode: `pokemon_${usd(p.priceMicros)}`, priceUsd: usd(p.priceMicros), valueUsd: null, sellUsd: null, pulledAt: p.blockTime, card: null, eligible: false, reason: null, coverageBps: 0, rebateUsd: 0, claim: null };
     const no = (reason: string, extra: Partial<ClaimCandidate> = {}) => ({ ...base, ...extra, reason });
     const existing = (await this.db.query<ClaimRow>('SELECT * FROM claims WHERE memo=$1', [p.memo])).rows[0];
     if (existing) return { ...base, valueUsd: existing.wallet === wallet ? usd(Number(existing.value_micros)) : null, reason: existing.wallet === wallet ? 'Already claimed.' : 'Claimed by another wallet.', claim: existing.wallet === wallet ? { status: existing.status, rebateUsd: usd(Number(existing.rebate_micros)), signature: existing.signature } : null };
@@ -85,19 +99,22 @@ export class Claims {
     const card = status?.send?.nft_address ? { mint: status.send.nft_address as string, name: null, image: null } : null;
     const known = { card, valueUsd: valueMicros === null ? null : usd(valueMicros), packCode: (status?.pack?.pack_type as string | undefined) ?? base.packCode };
     if (problem) return no(problem, known);
-    if (valueMicros! >= p.priceMicros) return no('This pull was worth at least what you paid.', known);
-    if (!s.offsite.enabled || s.paused) return no('Off-site claims are paused right now.', known);
+    // Rebates go by what the card really sells back for: the live offer, or the machine's usual rate if it has none (say it's already sold).
+    const sellMicros = sellValueMicros(valueMicros!, sellBpsFor(known.packCode), await this.offer(card?.mint));
+    const priced = { ...known, sellUsd: usd(sellMicros) };
+    if (sellMicros >= p.priceMicros) return no('This card sells back for at least what you paid.', priced);
+    if (!s.offsite.enabled || s.paused) return no('Off-site claims are paused right now.', priced);
     let check;
     try { check = await this.holders.offsiteTier(wallet, activatedAt, p.blockTime); }
-    catch (e) { return no(/^This wallet/.test((e as Error).message) ? (e as Error).message : 'Your coin history could not be read right now. Try again shortly.', known); }
-    if (!check.tier) return no(check.reason ?? 'Your holdings did not qualify for this pull.', known);
+    catch (e) { return no(/^This wallet/.test((e as Error).message) ? (e as Error).message : 'Your coin history could not be read right now. Try again shortly.', priced); }
+    if (!check.tier) return no(check.reason ?? 'Your holdings did not qualify for this pull.', priced);
     const coverage = offsiteCoverageBps(check.tier, health ?? await this.pool.health());
-    const rebate = rebateMicros(p.priceMicros, valueMicros!, coverage, offsiteRebateCapMicros(s));
-    if (rebate <= 0) return no('The pool is below its reserve target, so off-site coverage is temporarily zero.', { ...known, coverageBps: coverage });
+    const rebate = rebateMicros(p.priceMicros, sellMicros, coverage, offsiteRebateCapMicros(s));
+    if (rebate <= 0) return no('The pool is below its reserve target, so off-site coverage is temporarily zero.', { ...priced, coverageBps: coverage });
     // Coverage is immediate, so a per-wallet daily claim limit is what keeps new wallets in check.
     const limit = s.offsite.perWalletDailyClaims, used = today ?? await this.pool.claimsToday(wallet);
-    if (limit > 0 && used.count >= limit) return no(`Daily limit reached (${limit} claim${limit > 1 ? 's' : ''} per 24h). You can claim this again in ${until(used.nextAt)}.`, { ...known, coverageBps: coverage, rebateUsd: usd(rebate) });
-    return { ...base, ...known, eligible: true, coverageBps: coverage, rebateUsd: usd(rebate) };
+    if (limit > 0 && used.count >= limit) return no(`Daily limit reached (${limit} claim${limit > 1 ? 's' : ''} per 24h). You can claim this again in ${until(used.nextAt)}.`, { ...priced, coverageBps: coverage, rebateUsd: usd(rebate) });
+    return { ...base, ...priced, eligible: true, coverageBps: coverage, rebateUsd: usd(rebate) };
   }
 
   /** One pull by its payment transaction, for "paste your transaction" when a scan can't find it. */
@@ -132,7 +149,7 @@ export class Claims {
       if (unpaid + rebate > backlogCap) throw new Error('You already have claims waiting to be paid. Claim this one after they pay out.');
       const now = Date.now();
       const inserted = await this.db.query('INSERT INTO claims(memo,wallet,status,price_micros,value_micros,coverage_bps,rebate_micros,pulled_at,created_at,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(memo) DO NOTHING RETURNING memo',
-        [memo, wallet, 'approved', payment.priceMicros, micros(candidate.valueUsd!), candidate.coverageBps, rebate, payment.blockTime, now, JSON.stringify({ signature: payment.signature, nft: candidate.card?.mint, packType: candidate.packCode })]);
+        [memo, wallet, 'approved', payment.priceMicros, micros(candidate.valueUsd!), candidate.coverageBps, rebate, payment.blockTime, now, JSON.stringify({ signature: payment.signature, nft: candidate.card?.mint, packType: candidate.packCode, sellUsd: candidate.sellUsd })]);
       if (!inserted.rows.length) throw new Error('This pack has already been claimed.');
       await audit(this.db, 'claim-approved', { memo, wallet, rebateUsd: candidate.rebateUsd });
       return { ...candidate, eligible: false, reason: 'Claim approved.', claim: { status: 'approved', rebateUsd: candidate.rebateUsd, signature: null } };

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FeedPull, HolderTier, SitePull } from '../../../shared/types';
+import { sellBpsFor } from '../../../shared/packs';
 import { ago, api, money, solscan } from '../api';
 import { Link, navigate, useApp } from '../app';
 import { SectionTitle, TradingCard, isWatch } from '../ui';
@@ -13,8 +14,9 @@ export function useRebateTier() {
   return { tier, mine: !!mine, tiers, maxRebateUsd: Number(config?.settings?.maxRebateUsd ?? Infinity) };
 }
 
-/** What an on-site pack with this pull would have sent back: coverage of the shortfall, capped like a real order. */
-export function rebateFor(priceUsd: number, valueUsd: number, tier: HolderTier | null, maxRebateUsd: number) {
+/** What an on-site pack with this pull would have sent back: coverage of the gap to its sell-back price, capped like a real order. */
+export function rebateFor(code: string, priceUsd: number, insuredUsd: number, tier: HolderTier | null, maxRebateUsd: number) {
+  const valueUsd = insuredUsd * sellBpsFor(code) / 10_000;
   if (!tier || valueUsd >= priceUsd) return 0;
   const cap = Math.min(maxRebateUsd, Math.floor(priceUsd * tier.onsiteCoverageBps / 100) / 100);
   return Math.min(cap, Math.floor((priceUsd - valueUsd) * tier.onsiteCoverageBps / 100) / 100);
@@ -54,7 +56,7 @@ export function useSitePulls(every = 30_000) {
 export function PullCard({ pull, className = '' }: { pull: FeedPull | SitePull; className?: string }) {
   const { tier, maxRebateUsd } = useRebateTier();
   const up = pull.valueUsd >= pull.priceUsd, paid = 'rebateUsd' in pull ? pull.rebateUsd : null, ours = 'txs' in pull;
-  const change = Math.round((pull.valueUsd / pull.priceUsd - 1) * 100), back = paid ?? rebateFor(pull.priceUsd, pull.valueUsd, tier, maxRebateUsd);
+  const change = Math.round((pull.valueUsd / pull.priceUsd - 1) * 100), back = paid ?? rebateFor(pull.code, pull.priceUsd, pull.valueUsd, tier, maxRebateUsd);
   const name = pull.card?.name ?? 'Graded card', [title] = name.split(' · ');
   const proof = ours ? null : solscan('token', pull.mint);
   const slab = <TradingCard size="sm" card={{ name, image: pull.card?.image ?? null, insuredValueUsd: pull.valueUsd, rarity: null }} watch={isWatch(pull.code)} />;

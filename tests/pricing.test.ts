@@ -50,7 +50,7 @@ test('a quote carries the priced fee, the cut coverage and the rebate cap that g
   assert.deepEqual([q.feeBps, q.feeMicros, q.totalMicros, q.coverageBps, q.maxRebateMicros, q.riskPriced], [2_500, micros(25), micros(125), 6_900, micros(69), true]);
 });
 
-/** Half the pulls lose half the price, so the expected loss is 25% of it. */
+/** Half the pulls are insured at the pack price and half at half of it. On a 93% machine that sells 30.25% under the pack on average. */
 async function seedPulls(s: Awaited<ReturnType<typeof setup>>, code: string, priceUsd: number, n = 600) {
   await s.db.query(`INSERT INTO cc_pulls(id,code,value_cents,pulled_at) SELECT 'seed-' || i, $1, CASE WHEN i % 2 = 0 THEN $2::int ELSE $3::int END, $4::bigint + i FROM generate_series(1, $5::int) AS i`, [code, priceUsd * 100, priceUsd * 50, Date.now() - 1_000_000, n]);
 }
@@ -61,13 +61,13 @@ test('orders buy at the priced terms, and the rebate is paid at the coverage tha
   await seedPulls(s, 'pokemon_100', 100);
   const { wallet } = await user(s, 20_000);
   const offered = (await s.orders.quotes(wallet)).find(p => p.code === 'pokemon_100')!.quote;
-  assert.deepEqual([offered.feeBps, offered.coverageBps, offered.riskPriced], [2_500, 6_900, true]);
+  assert.deepEqual([offered.feeBps, offered.coverageBps, offered.riskPriced], [2_500, 5_700, true]);
   const { order } = await s.orders.create(wallet, 'pokemon_100');
-  assert.deepEqual([order.feeUsd, order.totalUsd, order.coverageBps, order.maxRebateUsd], [25, 125, 6_900, 69]);
+  assert.deepEqual([order.feeUsd, order.totalUsd, order.coverageBps, order.maxRebateUsd], [25, 125, 5_700, 57]);
   await s.orders.pay(wallet, order.id, 'practice');
   const done = await settle(s, order.id);
   assert.equal(done.status, 'complete', done.message ?? '');
-  assert.equal(micros(done.rebateUsd!), rebateMicros(micros(100), micros(done.valueUsd!), 6_900, micros(69)));
+  assert.equal(micros(done.rebateUsd!), rebateMicros(micros(100), micros(done.sellUsd!), 5_700, micros(57)));
   await s.db.close();
 });
 
@@ -86,8 +86,8 @@ test('stats show each tier the same terms an order would get, and the average re
   const s = await setup({ maxRebateUsd: 1_000 });
   await seedPulls(s, 'pokemon_100', 100);
   const stat = (await s.feed.stats()).packs.find(p => p.code === 'pokemon_100')!;
-  assert.equal(stat.expectedLossRatio, 0.25);
-  assert.deepEqual(stat.terms.t3, { feeBps: 2_500, coverageBps: 6_900, riskPriced: true });
-  assert.equal(stat.avgRebateUsd.t3, 17.25);
+  assert.ok(Math.abs(stat.expectedLossRatio - 0.3025) < 1e-9);
+  assert.deepEqual(stat.terms.t3, { feeBps: 2_500, coverageBps: 5_700, riskPriced: true });
+  assert.equal(stat.avgRebateUsd.t3, 17.24);
   await s.db.close();
 });

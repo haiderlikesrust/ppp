@@ -11,7 +11,7 @@ import { CashOut } from '../parts/cashout';
 import { ShareButton } from '../parts/share';
 import { RecentPullsStrip, useRecentPulls } from '../parts/pulls';
 import { Booster, GradeRing, Modal, SectionTitle, TradingCard, TypeBadge, isWatch, packStyle, useCount } from '../ui';
-import { packDef } from '../../../shared/packs';
+import { packDef, sellBpsFor } from '../../../shared/packs';
 import { useShowcase } from '../showcase';
 
 type Pack = { code: string; priceUsd: number; quote: Quote };
@@ -241,7 +241,7 @@ function Hero({ mode, vault, paidBack, opened }: { mode?: string; vault: number 
   const front = useShowcase()?.example, recent = useRecentPulls();
   const best = [...(recent ?? [])].filter(p => p.card?.image).sort((a, b) => b.valueUsd / b.priceUsd - a.valueUsd / a.priceUsd).slice(0, 4);
   const spot = (i: number) => ({ translate: `calc(-50% + ${i * 66}%) ${Math.abs(i) * 15}px`, rotate: `${i * 7}deg`, zIndex: 3 - Math.abs(i), animationDelay: `${0.1 + Math.abs(i) * 0.08}s` }) as CSSProperties;
-  const back = front ? Math.floor((25 - front.insuredValueUsd) * 50) / 100 : 7.85;
+  const back = Math.floor((25 - (front ?? SAMPLE).insuredValueUsd * sellBpsFor('pokemon_25') / 10_000) * 50) / 100;
   return <section className="pb-14 pt-10 text-center md:pt-16">
     <div className="enter mx-auto max-w-3xl">
       <span className="label inline-flex items-center gap-2"><i className="live-dot" />{mode === 'mainnet' ? 'Live on Solana' : mode === 'practice' ? 'Practice mode' : 'Launching on Solana'}</span>
@@ -275,7 +275,7 @@ function Figure({ label, value, tone = '', count = false }: { label: string; val
 function Example({ feeBps, coverageBps, tierName, illustrative }: { feeBps: number; coverageBps: number; tierName: string; illustrative: boolean }) {
   const real = useShowcase()?.example;
   const card = real ? { name: real.name, image: real.image, insuredValueUsd: real.insuredValueUsd, rarity: real.rarity } : SAMPLE;
-  const price = 25, fee = Math.round(price * feeBps) / 10_000, value = card.insuredValueUsd, rebate = Math.floor((price - value) * coverageBps / 100) / 100;
+  const price = 25, fee = Math.round(price * feeBps) / 10_000, value = card.insuredValueUsd, sell = Math.round(value * sellBpsFor('pokemon_25') / 100) / 100, rebate = Math.max(0, Math.floor((price - sell) * coverageBps / 100) / 100);
   return <div>
     <SectionTitle title="How a regrade works" sub={`${real ? 'A real $25 pull' : 'An example $25 pull'}, ${illustrative ? `at the ${tierName} grade` : `at your ${tierName} grade`}.`} />
     <div className="card grid items-center gap-6 p-5 sm:p-7 md:grid-cols-[160px_minmax(0,1fr)_auto] md:gap-10">
@@ -283,14 +283,15 @@ function Example({ feeBps, coverageBps, tierName, illustrative }: { feeBps: numb
       <div className="min-w-0">
         <dl className="grid gap-2.5">
           <div className="leader"><dt className="text-muted">Pack + {money(fee)} fee</dt><dd className="font-display num">{money(price + fee)}</dd></div>
-          <div className="leader"><dt className="text-muted">Card is worth</dt><dd className="font-display num">{money(value)}</dd></div>
-          <div className="leader"><dt className="text-muted">Under the pack price by</dt><dd className="font-display num text-loss">{money(price - value)}</dd></div>
+          <div className="leader"><dt className="text-muted">Card is insured at</dt><dd className="font-display num">{money(value)}</dd></div>
+          <div className="leader"><dt className="text-muted">It sells back for</dt><dd className="font-display num">{money(sell)}</dd></div>
+          <div className="leader"><dt className="text-muted">Under the pack price by</dt><dd className="font-display num text-loss">{money(price - sell)}</dd></div>
           <div className="leader"><dt className="text-muted">{tierName} covers</dt><dd className="font-display num">{pct(coverageBps)}</dd></div>
         </dl>
         <div className="mt-4 flex items-baseline justify-between gap-3 border-t border-line pt-3"><span className="font-display text-lg">Back to you</span><span className="font-display num text-3xl text-gain sm:text-4xl">+{money(rebate)}</span></div>
         <p className="mt-2 text-sm text-muted">You keep the card. Hold it, or cash it out in one tap.</p>
       </div>
-      <div className="grid place-items-center"><GradeRing priceUsd={price} valueUsd={value} rebateUsd={rebate} /></div>
+      <div className="grid place-items-center"><GradeRing priceUsd={price} valueUsd={sell} rebateUsd={rebate} /></div>
     </div>
   </div>;
 }
@@ -360,7 +361,7 @@ function OpenFlow({ pack, order, batch, batchOrders, onNext, onSold, onAgain, on
   const step = status === 'complete' ? STEPS.length : STEPS.findIndex(s => s.at.includes(status ?? 'awaiting_payment'));
   const revealed = !!order?.card;
   const failed = status === 'refunded' || status === 'expired' || status === 'review' || status === 'refunding';
-  const hit = !!order && order.valueUsd !== null && order.valueUsd >= order.priceUsd;
+  const sell = order?.sellUsd ?? order?.valueUsd ?? null, hit = !!order && sell !== null && sell >= order.priceUsd && !order.rebateUsd;
   const title = status === 'refunding' ? 'Refunding your payment' : status === 'review' ? 'Needs a quick check' : status === 'refunded' ? 'Refunded in full' : status === 'expired' ? 'Payment window closed'
     : revealed ? order!.card!.name.split(' · ')[0] : !order || status === 'awaiting_payment' ? 'Confirm in your wallet' : 'Opening your pack…';
   const kept = batchOrders?.filter(o => o.status !== 'refunded' && o.status !== 'expired');
@@ -383,10 +384,11 @@ function OpenFlow({ pack, order, batch, batchOrders, onNext, onSold, onAgain, on
       </ol>}
 
       {order && order.valueUsd !== null && !failed && <div className="enter mt-5 flex items-center gap-5">
-        <GradeRing priceUsd={order.priceUsd} valueUsd={order.valueUsd} rebateUsd={order.rebateUsd ?? 0} size={112} />
+        <GradeRing priceUsd={order.priceUsd} valueUsd={sell!} rebateUsd={order.rebateUsd ?? 0} size={112} />
         <dl className="grid min-w-0 flex-1 gap-1.5 text-sm">
           <div className="leader"><dt className="text-muted">You paid</dt><dd className="font-display num">{money(order.totalUsd)}</dd></div>
-          <div className="leader"><dt className="text-muted">Card value</dt><dd className={`font-display num ${hit ? 'text-gain' : ''}`}>{money(order.valueUsd)}</dd></div>
+          <div className="leader"><dt className="text-muted">Insured value</dt><dd className="font-display num">{money(order.valueUsd)}</dd></div>
+          <div className="leader"><dt className="text-muted">Sells back for</dt><dd className={`font-display num ${hit ? 'text-gain' : ''}`}>{order.sellUsd === null ? '…' : money(order.sellUsd)}</dd></div>
           <div className="leader"><dt className="text-muted">Back to you</dt><dd className={`font-display num ${hit ? 'text-muted' : 'text-gain'}`}>{hit ? 'Not needed' : order.rebateUsd === null ? '…' : `+${money(order.rebateUsd)}`}</dd></div>
         </dl>
       </div>}

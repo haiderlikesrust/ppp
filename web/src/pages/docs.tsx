@@ -39,7 +39,7 @@ export function DocsPage() {
   const poolShare = pct(s.poolShareBps), burnShare = pct(10_000 - s.poolShareBps), priced = !!s.pricing?.enabled;
   const fee = priced ? `${pct(s.pricing.minFeeBps)}–${pct(s.pricing.maxFeeBps)}` : pct(s.feeBps);
   const share = (ppm: number) => `${+(ppm / 10_000).toFixed(3)}%`;
-  const example = (bps: number) => Math.floor((25 - 9.3) * bps / 100) / 100;
+  const example = (bps: number) => Math.floor((25 - 7.9) * bps / 100) / 100;
   const window = windowLabel(s.offsite.claimWindowHours ?? 48);
   const limits = s.offsite.perWalletDailyClaims > 0 || s.offsite.perWalletDailyUsd > 0 || s.offsite.perWalletWeeklyUsd > 0 || s.offsite.dailyPoolBps > 0;
 
@@ -57,31 +57,31 @@ export function DocsPage() {
       <p className="mt-5 text-lg text-muted">How rebates are worked out, who qualifies, where the money comes from, and how to check every step on-chain. Regrade doesn't grade cards: a regrade is our name for the rebate on a bad pull.</p>
 
       <Entry n={1} id="basics" title="The short version">
-        <p>Most packs on Collector Crypt, Pokémon cards and luxury watches alike, pull something worth less than the pack. A few pull far more. Regrade pays token holders part of that downside back, in USDC.</p>
+        <p>Most packs on Collector Crypt, Pokémon cards and luxury watches alike, pull something that sells back for less than the pack. A few pull far more. Regrade pays token holders part of that downside back, in USDC.</p>
         <div className="not-prose my-6 grid gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3">
-          {[['Hold the token', 'Your lowest balance sets your grade and how much you get back.'], ['Open a pack', `Here, with a protection fee priced for that pack, or on Collector Crypt, pump.fun or Jupiter.`], ['Get some back', 'When the card is worth less than the pack, part of the gap is paid to you.']].map(([t, d], i) =>
+          {[['Hold the token', 'Your lowest balance sets your grade and how much you get back.'], ['Open a pack', `Here, with a protection fee priced for that pack, or on Collector Crypt, pump.fun or Jupiter.`], ['Get some back', 'When the card sells back for less than the pack, part of the gap is paid to you.']].map(([t, d], i) =>
             <div key={t} className="bg-surface p-5"><div className="font-display text-3xl text-accent">0{i + 1}</div><div className="mt-3 font-semibold text-ink">{t}</div><p className="mt-1 text-sm">{d}</p></div>)}
         </div>
         <p>You always keep the card, and the rebate comes on top. Packs opened here are paid back automatically. Packs opened on Collector Crypt, pump.fun, Jupiter or another app that sells Collector Crypt packs can be claimed at a lower rate.</p>
       </Entry>
 
       <Entry n={2} id="math" title="The rebate math">
-        <div className="card font-display not-prose my-6 px-4 py-5 text-center text-xl text-accent sm:text-2xl">rebate = coverage × (pack price − card value)</div>
+        <div className="card font-display not-prose my-6 px-4 py-5 text-center text-xl text-accent sm:text-2xl">rebate = coverage × (pack price − sell-back price)</div>
         <ul>
           <li><b>Pack price</b> is what the pack costs on Collector Crypt: $25 to $500 for Pokémon cards, $500 for watches. The protection fee isn't part of it.</li>
-          <li><b>Card value</b> is the insured value Collector Crypt records for the card or watch at the moment it's pulled. Nobody can change it afterwards, including us.</li>
+          <li><b>Sell-back price</b> is what Collector Crypt offers to pay you for the card right now, usually 85–93% of its insured value depending on the machine. It's money you can actually get, so your rebate is measured from it. If there's no live offer, we use that machine's usual rate.</li>
           <li><b>Coverage</b> comes from your grade, and is lower for packs opened elsewhere. On the riskiest packs it can be capped: see how fees are set.</li>
-          <li>One rebate is capped at <b>{money(s.maxRebateUsd)}</b>. A card worth the pack price or more needs no rebate.</li>
+          <li>One rebate is capped at <b>{money(s.maxRebateUsd)}</b>. A card that sells back for the pack price or more needs no rebate.</li>
         </ul>
         <div className="card not-prose my-6 grid gap-6 p-5 sm:grid-cols-[96px_1fr] sm:p-6">
           <div className="w-24"><Booster code="pokemon_25" priceUsd={25} /></div>
           <div className="min-w-0">
-            <div className="label">A $25 Leaf pack pulls a card worth $9.30</div>
+            <div className="label">A $25 Leaf pack pulls a card insured at $9.30, which sells back for $7.90</div>
             <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[300px] text-sm">
               <thead><tr className="text-left"><th className="label pb-2 font-medium">Grade</th><th className="label pb-2 font-medium">Coverage</th><th className="label pb-2 text-right font-medium">Back to you</th></tr></thead>
-              <tbody>{tiers.map(t => <tr key={t.id} className="border-t border-line"><td className="font-semibold py-2 text-ink">{t.name}</td><td className="num">{pct(t.onsiteCoverageBps)} of $15.70</td><td className="font-display num text-right text-gain">+{money(example(t.onsiteCoverageBps))}</td></tr>)}</tbody>
+              <tbody>{tiers.map(t => <tr key={t.id} className="border-t border-line"><td className="font-semibold py-2 text-ink">{t.name}</td><td className="num">{pct(t.onsiteCoverageBps)} of $17.10</td><td className="font-display num text-right text-gain">+{money(example(t.onsiteCoverageBps))}</td></tr>)}</tbody>
             </table></div>
-            <div className="mt-4"><RebateBar priceUsd={25} valueUsd={9.3} rebateUsd={example(mid?.onsiteCoverageBps ?? 5_000)} /></div>
+            <div className="mt-4"><RebateBar priceUsd={25} valueUsd={7.9} rebateUsd={example(mid?.onsiteCoverageBps ?? 5_000)} /></div>
           </div>
         </div>
       </Entry>
@@ -104,7 +104,7 @@ export function DocsPage() {
         <p>{priced ? <>Every pack on Collector Crypt pays out differently, so one flat fee would overcharge some packs and undercharge others. Each pack's fee is worked out from its own last 5,000 pulls at most, and it updates as new pulls come in.</> : <>Every pack currently pays a flat <b>{pct(s.feeBps)}</b> protection fee.</>}</p>
         {priced && <><div className="card font-display not-prose my-6 px-4 py-5 text-center text-lg text-accent sm:text-xl">fee = coverage × average shortfall × {+(1 + s.pricing.marginBps / 10_000).toFixed(2)} ÷ {poolShare}</div>
         <ul>
-          <li><b>Average shortfall</b> is how far the pack's cards fall below its price on average. Cards above the price count as zero.</li>
+          <li><b>Average shortfall</b> is how far the pack's cards sell back below its price on average. Cards that sell above the price count as zero.</li>
           <li><b>{pct(s.pricing.marginBps)} margin</b> keeps the vault ahead of the rebates it expects to pay.</li>
           <li>Fees stay between <b>{pct(s.pricing.minFeeBps)}</b> and <b>{pct(s.pricing.maxFeeBps)}</b> of the pack price. If the top fee can't pay for your grade's coverage on a pack, coverage on that pack is cut to what it can pay for, and the pack shows the lower number before you buy.</li>
           <li>A pack with fewer than {s.pricing.minSamples.toLocaleString('en-US')} recorded pulls uses the flat <b>{pct(s.feeBps)}</b> fee.</li>
@@ -117,7 +117,7 @@ export function DocsPage() {
           <li><b>Pick a pack.</b> Graded cards or a watch pack. You see the price, your fee for that pack, your coverage and the most you could get back.</li>
           <li><b>Pay once.</b> Your wallet signs a single USDC payment. Nothing else is ever requested.</li>
           <li><b>We open it.</b> We buy the pack on Collector Crypt and send the graded card NFT to your wallet.</li>
-          <li><b>Regraded, automatically.</b> If the card is worth less than the pack, the rebate lands in your wallet straight away. No claim needed.</li>
+          <li><b>Regraded, automatically.</b> If the card sells back for less than the pack, the rebate lands in your wallet straight away. No claim needed.</li>
         </ol>
         <p>Before you pay, the largest rebate your pack could need is set aside in the pool, so rebates on packs opened here are always payable. If Collector Crypt can't sell the pack (sold out, paused or refunded), you get the full amount back, fee included.</p>
       </Entry>
@@ -126,7 +126,7 @@ export function DocsPage() {
         <p>Don't want the card? For <b>72 hours</b> after a pull you can sell it straight back to Collector Crypt for a share of its insured value, usually 85–93% depending on the pack. The Cash out panel shows the sale and the rebate together as one total, against what you paid. Open several packs at once and you can cash out the whole batch with one approval.</p>
         <ul>
           <li>Your wallet signs a transaction for each card, sending it to Collector Crypt and paying you USDC. Your wallet shows that before you approve.</li>
-          <li>Selling doesn't change your rebate: it's already paid from the card's insured value.</li>
+          <li>Selling doesn't change your rebate: it was set from the sell-back offer when your pack settled, and it's already in your wallet.</li>
           <li>The offer comes from Collector Crypt and can move between the quote and your approval. Each sale stands alone, so one failing leaves the others sold.</li>
         </ul>
       </Entry>
@@ -182,7 +182,7 @@ export function DocsPage() {
         <p>The <Link href="/stats">Stats page</Link> shows every pack opened on Regrade and what Collector Crypt packs really pay out. We read Collector Crypt's public feed of recent pulls every 2 minutes and keep each machine's latest 5,000 pulls.</p>
         <ul>
           <li><b>Receipts:</b> every pack opened on Regrade with its transactions on Solscan: the buyer's payment, our purchase of the pack on Collector Crypt, the card sent to the buyer, the rebate, and the sale if the card was sold back. Each card also links to its NFT.</li>
-          <li><b>Pack stats:</b> the median card, the hit rate (cards worth at least the pack), the spread of values, and each grade's fee, coverage and average rebate on that pack. These same pulls set the fees.</li>
+          <li><b>Pack stats:</b> the median card, the hit rate (cards that sell back for at least the pack), the spread of values, and each grade's fee, coverage and average rebate on that pack. These same pulls set the fees.</li>
           <li><b>Leaderboards:</b> this week's biggest hit, most packs opened and biggest rebate on Regrade. They reset every Monday at 00:00 UTC, and last week's stay up for a week.</li>
           <li><b>Recent pulls:</b> the newest pulls on Collector Crypt with the real card photo, and what your grade would get back on a bad one. Tap a card to see its NFT on Solscan.</li>
         </ul>
@@ -204,7 +204,7 @@ export function DocsPage() {
             ['Is this insurance?', 'No. It is a discretionary rebate for holders, funded by creator fees and protection fees. It is not insurance and not a guarantee: payouts depend on the pool and the rules on this page.'],
             ['Do you grade cards?', 'No. Cards are graded by the companies named on them, and Collector Crypt sets their insured values. A regrade is our name for the rebate on a bad pull. Your grade is your holder tier.'],
             ['Do I keep the card?', 'Yes. The rebate comes on top. If you would rather have USDC, cash out within 72 hours.'],
-            ['Which card value do you use?', "Collector Crypt's insured value, recorded when the card was pulled. It's the same value Collector Crypt uses itself."],
+            ['Which card value do you use?', "Collector Crypt's live sell-back offer, because that's what you can actually get for the card. It's usually 85–93% of the insured value, so a $26 card from a $25 pack can still earn a rebate."],
             ['Why is my fee different on each pack?', 'Each pack pays out differently, and a higher grade gets more back, so the fee follows what that coverage costs on that pack. You see the exact fee before you pay.'],
             ['What if the pool runs low?', 'Rebates for packs opened here are reserved before you pay, so they are always paid. Off-site claims slow down instead: coverage shrinks and claims wait until the pool refills.'],
             ['Can I claim the same pack twice, or from another wallet?', 'No. Each pack can be claimed once, and only by the wallet that paid for it and received the card.'],

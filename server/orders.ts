@@ -8,9 +8,9 @@ import type { Pool } from './pool';
 import type { Gas } from './gas';
 import type { SettingsStore } from './settings';
 import { ApiError } from './cc/client';
-import { quote, rebateMicros, splitFee, usd, micros } from '../shared/protection';
+import { quote, rebateMicros, sellValueMicros, splitFee, usd, micros } from '../shared/protection';
 import type { Card, OrderStatus, OrderView, PackRisk, Quote } from '../shared/types';
-import { packCode, packDef } from '../shared/packs';
+import { packCode, packDef, sellBpsFor } from '../shared/packs';
 import { checkSaleTransaction } from './sale';
 
 /** Runs a critical section; the app passes the coordinator's Serial queue, tests run it directly. */
@@ -51,6 +51,8 @@ type OrderData = {
   sale?: { amountMicros: number; signature: string; at: number };
   attempt?: number; purchaseId?: string; memo?: string; packSignature?: string; card?: Card; valueMicros?: number;
   nftSignature?: string; settleCoverageBps?: number; rebateMicros?: number; rebateSignature?: string | null;
+  /** What the card sold back for when the rebate was set: the live offer, or the machine's usual rate without one. */
+  sellMicros?: number;
   poolShareMicros?: number; refundSignature?: string; refundReason?: string; message?: string | null; failures?: number; retryAt?: number; cancelled?: boolean;
   /** Pack-purchase attempts proven not to have moved USDC (expired or failed on-chain). */
   unpaidAttempts?: number[];
@@ -314,8 +316,11 @@ export class Orders {
           await this.holders.snapshot(row.wallet);
           const now = await this.holders.tierFor(row.wallet, d.quotedAt - s.onsiteHoldHours * 3_600_000, Date.now());
           const coverage = Math.min(row.coverage_bps, now.tier?.onsiteCoverageBps ?? 0);
-          const rebate = rebateMicros(price, row.data.valueMicros!, coverage, Number(row.max_rebate_micros));
-          await this.save(row, 'settling', { settleCoverageBps: coverage, rebateMicros: rebate, poolShareMicros: splitFee(fee, d.poolShareBps).pool });
+          // The rebate closes the gap to what the buyer can really get for the card today, not its insured value.
+          const offer = await this.packs.buybackQuote(d.card!.mint).catch(() => null);
+          const sell = sellValueMicros(row.data.valueMicros!, sellBpsFor(packCode(d.packCode, usd(price))), offer?.available ? offer.amountMicros : null);
+          const rebate = rebateMicros(price, sell, coverage, Number(row.max_rebate_micros));
+          await this.save(row, 'settling', { settleCoverageBps: coverage, sellMicros: sell, rebateMicros: rebate, poolShareMicros: splitFee(fee, d.poolShareBps).pool });
         }
         const rebate = row.data.rebateMicros!;
         let rebateSignature: string | null = null;
@@ -331,7 +336,7 @@ export class Orders {
           await this.db.query('UPDATE pulls SET rebate_micros=$2 WHERE order_id=$1', [row.id, rebate]);
           await this.pool.release(row.id);
         });
-        await this.save(row, 'complete', { rebateSignature, message: rebate > 0 ? `Rebate of $${(Math.round(rebate / 10_000) / 100).toFixed(2)} sent.` : 'This pull beat the pack price, so no rebate was needed.' });
+        await this.save(row, 'complete', { rebateSignature, message: rebate > 0 ? `Rebate of $${(Math.round(rebate / 10_000) / 100).toFixed(2)} sent.` : 'This card sells back for more than the pack, so no rebate was needed.' });
         // The order is done either way; a breaker hiccup must not mark it delayed.
         try { await this.pool.checkBreaker(packCode(d.packCode, usd(price))); }
         catch (error) { await audit(this.db, 'breaker-check-error', { id: row.id, error: (error as Error).message }); }
@@ -431,7 +436,7 @@ function view(row: Row): OrderView {
   return {
     id: row.id, status: row.status, wallet: row.wallet, packCode: packCode(d.packCode, usd(price)), priceUsd: usd(price), feeUsd: usd(fee), totalUsd: usd(price + fee),
     coverageBps: d.settleCoverageBps ?? row.coverage_bps, maxRebateUsd: usd(Number(row.max_rebate_micros)), card: d.card ?? null,
-    valueUsd: d.valueMicros !== undefined ? usd(d.valueMicros) : null, rebateUsd: d.rebateMicros !== undefined ? usd(d.rebateMicros) : null,
+    valueUsd: d.valueMicros !== undefined ? usd(d.valueMicros) : null, sellUsd: d.sellMicros !== undefined ? usd(d.sellMicros) : null, rebateUsd: d.rebateMicros !== undefined ? usd(d.rebateMicros) : null,
     paymentSignature: row.payment_signature, rebateSignature: d.rebateSignature ?? null, refundSignature: d.refundSignature ?? null, nftSignature: d.nftSignature ?? null,
     // Review reasons can be internal (RPC or provider errors); the buyer only sees that it is being checked.
     message: row.status === 'review' ? 'This order needs a manual check. Your payment is safe and the team has been alerted.' : d.message ?? null, createdAt: Number(row.created_at),
