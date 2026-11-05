@@ -9,7 +9,7 @@ import type { Gas } from './gas';
 import type { SettingsStore } from './settings';
 import { ApiError } from './cc/client';
 import { quote, rebateMicros, splitFee, usd, micros } from '../shared/protection';
-import type { Card, OrderStatus, OrderView, Quote } from '../shared/types';
+import type { Card, OrderStatus, OrderView, PackRisk, Quote } from '../shared/types';
 import { packCode, packDef } from '../shared/packs';
 import { checkSaleTransaction } from './sale';
 
@@ -67,21 +67,23 @@ type Row = { id: string; wallet: string; status: OrderStatus; price_micros: stri
  * POOL pays the rebate immediately when the card is worth less than the price.
  */
 export class Orders {
-  constructor(readonly db: Database, readonly jobs: Jobs, readonly solana: Solana, readonly packs: PackProvider, readonly holders: Holders, readonly pool: Pool, readonly settings: SettingsStore, readonly gas: Gas) {}
+  constructor(readonly db: Database, readonly jobs: Jobs, readonly solana: Solana, readonly packs: PackProvider, readonly holders: Holders, readonly pool: Pool, readonly settings: SettingsStore, readonly gas: Gas,
+    /** Each pack's pull history. A pack missing here, or a failed read, falls back to the flat fee. */
+    private readonly risks: () => Promise<Map<string, PackRisk>> = async () => new Map()) {}
 
   /** The settings a wallet buys on: tier exception wallets pay no protection fee. */
   private terms(wallet: string | null) {
     const s = this.settings.current;
-    return wallet && s.walletTiers.some(e => e.wallet === wallet) ? { ...s, feeBps: 0 } : s;
+    return wallet && s.walletTiers.some(e => e.wallet === wallet) ? { ...s, feeBps: 0, pricing: { ...s.pricing, enabled: false } } : s;
   }
 
   /** A personalized quote for every available pack. */
   async quotes(wallet: string | null) {
     const machines = await this.packs.machines();
     const tier = wallet ? (await this.holders.onsiteTier(wallet, { fresh: false })).tier : null;
-    const free = await this.pool.free(), terms = this.terms(wallet);
+    const free = await this.pool.free(), terms = this.terms(wallet), risks = await this.risks().catch(() => new Map<string, PackRisk>());
     return machines.map(m => {
-      const q = quote(m.priceUsd, tier, terms, free, m.code);
+      const q = quote(m.priceUsd, tier, terms, free, m.code, risks.get(m.code));
       // Before mainnet is enabled nothing can be bought, so nothing is offered as protected.
       return { code: m.code, priceUsd: m.priceUsd, quote: this.solana.canSpend ? q : { ...q, protected: false, coverageBps: 0, maxRebateMicros: 0, reason: 'Protected packs open at launch.' } };
     });
@@ -135,7 +137,8 @@ export class Orders {
     if (next) throw Object.assign(new Error(`This wallet can open its next pack in ${wait(next - Date.now())}. Nothing was charged.`), { statusCode: 429 });
     if (count > this.maxPerOpen(wallet)) throw new Error('This wallet opens one pack at a time.');
     const check = await this.holders.onsiteTier(wallet);
-    const free = await this.pool.free(), first = quote(priceUsd, check.tier, s, free, code);
+    const risk = (await this.risks().catch(() => new Map<string, PackRisk>())).get(code);
+    const free = await this.pool.free(), first = quote(priceUsd, check.tier, s, free, code, risk);
     if (!first.protected) throw new Error(first.reason ?? check.reason ?? 'This pack cannot be protected right now.');
     // Every pack reserves its largest rebate when paid; say up front how many the pool can take.
     const fits = first.maxRebateMicros > 0 ? Math.floor(free / first.maxRebateMicros) : count;
@@ -146,12 +149,12 @@ export class Orders {
     if (!funds.usdcAccount || funds.usdcMicros < total) throw new Error(`${count > 1 ? `These ${count} packs cost` : 'This pack costs'} ${dollars(total)} in USDC and this wallet has ${dollars(funds.usdcMicros)}. Add USDC to this wallet and try again.`);
     if (funds.lamports < BUYER_MIN_LAMPORTS) throw new Error('This wallet needs a little SOL (0.002 is plenty) to pay the Solana network fee.');
     const ids = Array.from({ length: count }, () => randomUUID()), batch = count > 1 ? randomUUID() : null;
-    const payments = await Promise.all(ids.map(id => this.solana.buildUserPayment(wallet, first.totalMicros, `pp-${id}`)));
+    const payments = await Promise.all(ids.map(id => this.solana.buildUserPayment(wallet, first.totalMicros, `rg-${id}`)));
     return run(async () => {
       // A cancelled unpaid order no longer blocks a new one; it still settles if a payment lands before it expires.
       const waiting = (await this.db.query<Row>("SELECT * FROM orders WHERE wallet=$1 AND status IN ('awaiting_payment','paying') AND NOT COALESCE((data->>'cancelled')::boolean, FALSE)", [wallet])).rows[0];
       if (waiting) throw Object.assign(new Error('Finish or let your current order expire before starting another.'), { statusCode: 409 });
-      const q = quote(priceUsd, check.tier, this.terms(wallet), await this.pool.free(), code);
+      const q = quote(priceUsd, check.tier, this.terms(wallet), await this.pool.free(), code, risk);
       if (!q.protected) throw new Error(q.reason ?? 'This pack cannot be protected right now.');
       if (q.totalMicros !== first.totalMicros || q.coverageBps !== first.coverageBps) throw new Error('The price or coverage just changed. Please try again.');
       const now = Date.now();

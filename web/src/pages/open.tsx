@@ -1,23 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Check, Plus } from 'lucide-react';
-import type { OrderView, PoolView, Quote } from '../../../shared/types';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { ArrowDown, ArrowRight, ArrowUpRight } from 'lucide-react';
+import type { OrderView, PackStats, PoolView, Quote, StatsView } from '../../../shared/types';
 import { ago, api, friendly, money, pct, solscan } from '../api';
 import { Link, useApp } from '../app';
 import { ensureSigner, hasSigner, signPayment, signPayments } from '../wallet';
 import { CoverageLadder } from '../parts/holder';
 import { ContractAddress } from '../parts/contract';
 import { PackOpening } from '../parts/opening';
-import { RecentPullsStrip } from '../parts/pulls';
-import { XLogo, X_HANDLE, X_URL } from '../parts/social';
-import { Booster, Modal, RebateBar, SectionTitle, Slab, isWatch, packStyle } from '../ui';
+import { CashOut } from '../parts/cashout';
+import { ShareButton } from '../parts/share';
+import { RecentPullsStrip, useRecentPulls } from '../parts/pulls';
+import { Booster, GradeRing, Modal, SectionTitle, TradingCard, TypeBadge, isWatch, packStyle, useCount } from '../ui';
 import { packDef } from '../../../shared/packs';
-import { windowLabel } from '../../../shared/protection';
 import { useShowcase } from '../showcase';
 
 type Pack = { code: string; priceUsd: number; quote: Quote };
 type Activity = { kind: 'onsite' | 'offsite'; wallet: string; code: string; priceUsd: number; valueUsd: number; rebateUsd: number; cardName: string | null; at: number };
 const FINAL = ['complete', 'refunded', 'expired', 'review'];
 const IN_PROGRESS = ['paying', 'paid', 'buying', 'delivering', 'settling', 'refunding'];
+/** A real pull's shape, for the frames before Collector Crypt's example has loaded. */
+const SAMPLE = { name: 'Sylveon · Crown Zenith · PSA 9', image: null, insuredValueUsd: 9.3, rarity: 'Common' };
 
 export function OpenPage() {
   const { me, config, connect, notify, refresh, version, bump } = useApp();
@@ -30,9 +32,10 @@ export function OpenPage() {
   const [qty, setQty] = useState(1), [maxPerOpen, setMaxPerOpen] = useState(5), count = Math.min(qty, maxPerOpen);
   // Packs opened together are revealed one after another, then summed up.
   const [batch, setBatch] = useState<Batch | null>(null), batchRef = useRef<Batch | null>(null);
-  const [summary, setSummary] = useState<BatchSummary | null>(null);
+  const [batchOrders, setBatchOrders] = useState<OrderView[] | null>(null);
   const toBatch = (b: Batch | null) => { batchRef.current = b; setBatch(b); };
   const [pool, setPool] = useState<PoolView | null>(null);
+  const [stats, setStats] = useState<StatsView | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [history, setHistory] = useState<OrderView[]>([]);
   const [order, setOrder] = useState<OrderView | null>(null);
@@ -45,6 +48,7 @@ export function OpenPage() {
     setPacksFailed(false);
     api<{ packs: Pack[]; nextPackAt: number | null; maxPerOpen?: number }>('/packs').then(r => { setPacks(r.packs); setNextPackAt(r.nextPackAt ?? null); setMaxPerOpen(r.maxPerOpen ?? 1); }).catch(() => setPacksFailed(true));
     api<PoolView>('/pool').then(setPool).catch(() => {});
+    api<StatsView>('/stats').then(setStats).catch(() => {});
     api<{ items: Activity[] }>('/activity').then(r => setActivity(r.items)).catch(() => {});
     if (me.wallet) api<{ orders: OrderView[] }>('/orders').then(r => setHistory(r.orders)).catch(() => {}); else setHistory([]);
   }, [me.wallet]);
@@ -63,12 +67,12 @@ export function OpenPage() {
         const next = await api<OrderView>(`/orders/${id}`);
         if (following.current !== id) return;
         setOrder(next);
-        // Bumping reloads this page's lists, the Just pulled strip and the vault balance.
+        // Bumping reloads this page's lists, the Just graded strip and the vault balance.
         if (FINAL.includes(next.status)) {
           following.current = null; bump(); refresh().catch(() => {});
           // The last pack of a batch: add the whole batch up.
           const b = batchRef.current;
-          if (b && b.index === b.ids.length - 1) Promise.all(b.ids.map(o => api<OrderView>(`/orders/${o}`))).then(all => { if (batchRef.current === b) setSummary(sum(all)); }).catch(() => {});
+          if (b && b.index === b.ids.length - 1) Promise.all(b.ids.map(o => api<OrderView>(`/orders/${o}`))).then(all => { if (batchRef.current === b) setBatchOrders(all); }).catch(() => {});
           return;
         }
       } catch (e) {
@@ -86,7 +90,7 @@ export function OpenPage() {
     if (!me.wallet) return connect();
     if (inFlight.current) return;
     inFlight.current = true; aborted.current = false;
-    setOpening(pack); setOrder(null); toBatch(null); setSummary(null);
+    setOpening(pack); setOrder(null); toBatch(null); setBatchOrders(null);
     let unpaid: string[] = [];
     try {
       const practice = config?.mode === 'practice' && !hasSigner();
@@ -152,180 +156,141 @@ export function OpenPage() {
     const running = !!order && IN_PROGRESS.includes(order.status);
     const others = batchRef.current ? batchRef.current.ids.length - batchRef.current.index - 1 : 0;
     aborted.current = true; following.current = null; clearTimeout(poll.current);
-    setOpening(null); setOrder(null); toBatch(null); setSummary(null);
+    setOpening(null); setOrder(null); toBatch(null); setBatchOrders(null);
     if (running || others) notify(`Your ${others ? 'packs keep' : 'pack keeps'} opening in the background. Find ${others ? 'them' : 'it'} under Your pulls.`);
     load();
   };
 
+  /** Sold cards come back as fresh orders: swap them into the open result and the batch totals. */
+  const onSold = (sold: OrderView[]) => {
+    const fresh = new Map(sold.map(o => [o.id, o]));
+    setOrder(o => o && fresh.get(o.id) ? fresh.get(o.id)! : o);
+    setBatchOrders(all => all ? all.map(o => fresh.get(o.id) ?? o) : all);
+    bump();
+  };
+
   const s = config?.settings, feeBps: number = s?.feeBps ?? 1_000;
   const tier = me.holder?.tier;
-  const sample = s?.tiers?.[1] ?? { name: 'Dolphin', onsiteCoverageBps: 5_000 };
-  const covered = tier?.onsiteCoverageBps;
+  const sample = s?.tiers?.[1] ?? { id: 't2', name: 'Mint', onsiteCoverageBps: 5_000 };
   const mode = config?.mode;
+  const statFor = useMemo(() => new Map(stats?.packs.map(p => [p.code, p])), [stats]);
+  const example = statFor.get('pokemon_25')?.terms[tier?.id ?? sample.id];
+  const opened = pool?.totals.packsOpened ?? null, paidBack = pool ? pool.totals.onsiteRebatesUsd + pool.totals.offsiteRebatesUsd : null;
   return <>
-    {/* Hero */}
-    <section className="enter flex flex-col items-center py-14 text-center md:py-24">
-      <span className="tag bg-volt-soft text-volt"><i className="live-dot" />{mode === 'mainnet' ? 'Live on Solana' : mode === 'practice' ? 'Practice mode' : 'Launching on Solana'}</span>
-      <h1 className="pixel mt-7 text-[2.3rem] font-bold leading-[1.05] min-[420px]:text-5xl sm:text-6xl md:text-[5.5rem]">BAD PULL?<br /><span className="text-volt">PULL BACK.</span></h1>
-      <p className="mt-7 max-w-xl text-lg text-muted">Open Collector Crypt packs here, Pokémon cards and luxury watches. When a pull comes in under the pack price, part of the loss lands back in your wallet in USDC, automatically.</p>
-      <div className="mt-9 grid w-full gap-3 sm:flex sm:w-auto">
-        <a href="#packs" className="btn btn-primary h-12 px-7">Open a pack<ArrowDown size={16} /></a>
-      </div>
-      <ContractAddress variant="hero" className="mx-auto mt-6" />
-      <div className="card mt-12 grid w-full max-w-3xl grid-cols-1 divide-y divide-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-        <Readout label="In the pool" value={money(pool?.balanceUsd)} />
-        <Readout label="Paid back" value={money(pool ? pool.totals.onsiteRebatesUsd + pool.totals.offsiteRebatesUsd : null)} tone="text-gain" />
-        <Readout label="Packs protected" value={pool ? String(pool.totals.packsOpened) : '—'} />
-      </div>
-    </section>
+    <Hero mode={mode} vault={pool?.balanceUsd ?? null} paidBack={paidBack} opened={opened} />
 
-    <CoveredApps hours={s?.offsite?.claimWindowHours ?? 48} />
-
-    {/* Example entry */}
-    <section className="pb-16">
-      <Example feeBps={feeBps} coverageBps={covered ?? sample.onsiteCoverageBps} tierName={tier?.name ?? sample.name} illustrative={!tier} />
-    </section>
-
-    {/* Packs */}
-    <section id="packs" className="scroll-mt-32 pb-16">
-      <SectionTitle title="Choose a pack" sub={`One graded Pokémon card or luxury watch per pack, straight from Collector Crypt.${packs?.length && packs.every(p => p.quote.feeMicros === 0) ? '' : ` Prices include the ${pct(feeBps)} protection fee.`}`}
-        action={me.wallet && maxPerOpen > 1 ? <div role="radiogroup" aria-label="Packs per open" className="flex rounded-md border border-line bg-surface p-1">
-          {[1, 3, 5].filter(n => n <= maxPerOpen).map(n => <button key={n} role="radio" aria-checked={count === n} onClick={() => setQty(n)} className={`pixel h-8 min-w-11 rounded px-3 text-xs ${count === n ? 'bg-volt text-night' : 'text-muted hover:text-ink'}`}>{n}×</button>)}
+    <section id="packs" className="scroll-mt-24 pb-16">
+      <SectionTitle title="The packs" sub="One graded card or watch per pack, straight from Collector Crypt. Each fee comes from that pack's own recent pulls."
+        action={me.wallet && maxPerOpen > 1 ? <div role="radiogroup" aria-label="Packs per open" className="flex rounded-[10px] border border-line p-0.5">
+          {[1, 3, 5].filter(n => n <= maxPerOpen).map(n => <button key={n} role="radio" aria-checked={count === n} onClick={() => setQty(n)} className={`font-display h-8 min-w-10 rounded-lg px-3 text-sm transition ${count === n ? 'bg-accent text-on-accent' : 'text-muted hover:text-ink'}`}>{n}×</button>)}
         </div> : undefined} />
       {packs && (['pokemon', 'watch'] as const).map(kind => {
         const list = packs.filter(p => (packDef(p.code)?.kind ?? 'pokemon') === kind);
-        return list.length ? <div key={kind} className="mb-12">
-          <div className="label mb-4 flex items-center gap-2">{kind === 'pokemon' ? 'Pokémon cards' : 'Luxury watches'}<span className="h-px flex-1 bg-line" /></div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">{list.map(p => <PackTile key={p.code} pack={p} signedIn={!!me.wallet} busy={opening !== null} waitMs={waitMs} count={count} onOpen={() => open(p, count)} />)}</div>
+        return list.length ? <div key={kind} className="mb-8 last:mb-0">
+          {kind === 'watch' && <div className="label mb-3">Luxury watches</div>}
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{list.map(p => <PackCard key={p.code} pack={p} stat={statFor.get(p.code)} signedIn={!!me.wallet} busy={opening !== null} waitMs={waitMs} count={count} onOpen={() => open(p, count)} />)}</div>
         </div> : null;
       })}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-8 lg:grid-cols-4">
-        {!packs && !packsFailed && [0, 1, 2, 3].map(i => <div key={i} className="aspect-[5/7] animate-pulse rounded-md bg-surface" />)}
-        {!packs && packsFailed && <div className="card col-span-full flex flex-wrap items-center justify-between gap-3 p-6"><div><div className="pixel">Packs could not be loaded.</div><div className="text-sm text-muted">Collector Crypt or our server did not answer. Your funds are not affected.</div></div><button className="btn btn-outline" onClick={load}>Try again</button></div>}
-        {packs && !packs.length && <div className="card col-span-full p-6 text-sm text-muted">No packs are available on Collector Crypt right now. Check back soon.</div>}
-      </div>
+      {!packs && !packsFailed && <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{[0, 1, 2, 3].map(i => <div key={i} className="shimmer h-80 rounded-2xl" />)}</div>}
+      {!packs && packsFailed && <div className="card flex flex-wrap items-center justify-between gap-3 p-6"><div><div className="font-display text-lg">Packs could not be loaded.</div><div className="text-sm text-muted">Collector Crypt or our server did not answer. Your funds are not affected.</div></div><button className="btn btn-outline" onClick={load}>Try again</button></div>}
+      {packs && !packs.length && <div className="card p-6 text-sm text-muted">No packs are available on Collector Crypt right now. Check back soon.</div>}
+    </section>
+
+    <section className="pb-16">
+      <Example feeBps={example?.feeBps ?? feeBps} coverageBps={example?.coverageBps ?? tier?.onsiteCoverageBps ?? sample.onsiteCoverageBps} tierName={tier?.name ?? sample.name} illustrative={!tier} />
     </section>
 
     <RecentPullsStrip />
 
-    <section className="pb-16"><CoverageLadder /></section>
-
-    {/* How it works */}
-    <section className="pb-16">
-      <SectionTitle title="Three steps" action={<Link href="/how-it-works" className="pixel text-sm text-volt hover:underline">How it works →</Link>} />
-      <ol className="grid gap-px overflow-hidden rounded-[10px] border border-line bg-line md:grid-cols-3">
-        {[
-          ['Hold the token', 'Your tier is your lowest balance over the window, so it rewards real holders, not quick flips.'],
-          ['Open a pack here', 'Pay once in USDC. We buy the pack on Collector Crypt and send the graded card to your wallet.'],
-          ['Get part of it back', covered ? `If the card is worth less than the pack, ${pct(covered)} of that gap is sent to you right away.` : 'If the card is worth less than the pack, part of that gap is sent to you right away. Your tier sets how much.'],
-        ].map(([title, text], i) => <li key={title} className="bg-surface p-6">
-          <div className="pixel text-4xl text-volt">0{i + 1}</div>
-          <h3 className="pixel mt-4 text-lg">{title}</h3><p className="mt-1.5 text-sm text-muted">{text}</p>
-        </li>)}
-      </ol>
-    </section>
+    <section className="pb-16"><SectionTitle title="Your grade" sub="Hold more of the token and more of a bad pull comes back." /><CoverageLadder /></section>
 
     {history.length > 0 && <section className="pb-16">
-      <SectionTitle title="Your pulls" sub="Tap one that's still opening to watch it." />
-      <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-6">
-        {history.slice(0, 12).map(o => <button key={o.id} onClick={() => resume(o)} className="min-w-0 text-left">
-          {o.card ? <Slab card={o.card} priceUsd={o.priceUsd} size="sm" watch={isWatch(o.packCode)} /> : <Booster code={o.packCode} priceUsd={o.priceUsd} className={IN_PROGRESS.includes(o.status) ? 'bob' : 'opacity-50 grayscale'} />}
-          <div className="mt-2 truncate text-center text-xs">{o.sale ? <span className="pixel text-water">Sold {money(o.sale.amountUsd)}</span> : o.rebateUsd ? <span className="pixel text-gain">+{money(o.rebateUsd)}</span> : o.card ? <span className="text-muted">{money(o.priceUsd)} pack</span> : <span className="pixel text-muted">{IN_PROGRESS.includes(o.status) ? 'Opening…' : o.status === 'refunded' ? 'Refunded' : o.status === 'review' ? 'Being checked' : 'Expired'}</span>}</div>
+      <SectionTitle title="Your pulls" sub="Tap one that's still opening to watch it." action={<Link href="/portfolio" className="font-display text-accent hover:underline">Full portfolio →</Link>} />
+      <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 xl:grid-cols-6">
+        {history.slice(0, 6).map(o => <button key={o.id} onClick={() => resume(o)} className="min-w-0 text-left">
+          {o.card ? <TradingCard card={o.card} priceUsd={o.priceUsd} size="sm" watch={isWatch(o.packCode)} /> : <Booster code={o.packCode} priceUsd={o.priceUsd} className={IN_PROGRESS.includes(o.status) ? 'float' : 'opacity-50 grayscale'} />}
+          <div className="mt-2 truncate text-center text-xs">{o.sale ? <span className="font-display num text-accent">Sold {money(o.sale.amountUsd)}</span> : o.rebateUsd ? <span className="font-display num text-gain">+{money(o.rebateUsd)}</span> : o.card ? <span className="text-muted">{money(o.priceUsd)} pack</span> : <span className="text-muted">{IN_PROGRESS.includes(o.status) ? 'Opening…' : o.status === 'refunded' ? 'Refunded' : o.status === 'review' ? 'Being checked' : 'Expired'}</span>}</div>
         </button>)}
       </div>
     </section>}
 
-    {/* Live rebates */}
-    <section className="pb-16">
-      <SectionTitle title="Live rebates" sub="Every pull that paid out, on-site and off-site." action={<span className="tag bg-gain-soft text-gain"><i className="live-dot" />Live</span>} />
+    <section className="pb-8">
+      <SectionTitle title="Live rebates" sub="Every pull that paid out, here and elsewhere." action={<span className="tag bg-gain-soft text-gain"><i className="live-dot" />Live</span>} />
       {activity.length ? <div className="card overflow-hidden">
-        <div className="hidden grid-cols-[1fr_auto_auto] gap-6 border-b border-line px-5 py-2.5 sm:grid"><span className="label">Pull</span><span className="label">When</span><span className="label w-24 text-right">Back</span></div>
-        {activity.slice(0, allActivity ? activity.length : 6).map((a, i) => <div key={`${a.at}-${i}`} className="grid grid-cols-[1fr_auto] items-center gap-x-6 border-b border-line px-4 py-3 last:border-0 sm:grid-cols-[1fr_auto_auto] sm:px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <i className="size-2.5 shrink-0" style={{ background: packStyle(a.code, a.priceUsd).color }} />
-            <div className="min-w-0">
-              <div className="truncate text-sm">{a.cardName ? a.cardName.split(' · ').slice(0, 2).join(' · ') : 'Opened off-site'}</div>
-              <div className="num truncate text-xs text-muted">{a.wallet} · {money(a.priceUsd)} {packStyle(a.code, a.priceUsd).name} · worth {money(a.valueUsd)}</div>
-            </div>
+        {activity.slice(0, allActivity ? activity.length : 6).map((a, i) => <div key={`${a.at}-${i}`} className="flex items-center gap-3 border-b border-line px-4 py-3 last:border-0 sm:px-5">
+          <TypeBadge code={a.code} priceUsd={a.priceUsd} size={32} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold">{a.cardName ? a.cardName.split(' · ').slice(0, 2).join(' · ') : 'Opened off-site'}</div>
+            <div className="num truncate text-xs text-muted">{a.wallet} · {money(a.priceUsd)} {packStyle(a.code, a.priceUsd).name} · worth {money(a.valueUsd)}</div>
           </div>
-          <span className="hidden text-xs text-faint sm:block">{ago(a.at)}</span>
-          <div className="text-right sm:w-24">{a.rebateUsd ? <span className="pixel num text-gain">+{money(a.rebateUsd)}</span> : <span className="tag bg-volt text-night">Hit</span>}<div className="text-[11px] text-faint sm:hidden">{ago(a.at)}</div></div>
+          <div className="shrink-0 text-right">{a.rebateUsd ? <span className="font-display num text-gain">+{money(a.rebateUsd)}</span> : <span className="tag bg-spark-soft text-warn">Hit</span>}<div className="text-[11px] text-faint">{ago(a.at)}</div></div>
         </div>)}
-        {activity.length > 6 && <button className="pixel flex h-11 w-full items-center justify-center gap-1.5 border-t border-line text-sm text-muted hover:bg-raised hover:text-ink" onClick={() => setAllActivity(v => !v)}>{allActivity ? 'Show less' : `Show all ${activity.length}`}<ArrowDown size={14} className={allActivity ? 'rotate-180' : ''} /></button>}
+        {activity.length > 6 && <button className="font-display flex h-11 w-full items-center justify-center gap-1.5 text-sm text-muted hover:text-ink" onClick={() => setAllActivity(v => !v)}>{allActivity ? 'Show less' : `Show all ${activity.length}`}<ArrowDown size={14} className={allActivity ? 'rotate-180' : ''} /></button>}
       </div> : <div className="card px-5 py-8 text-center text-sm text-muted">No pulls yet. Be the first.</div>}
     </section>
 
-    {/* Closing call to action */}
-    <section className="pt-4">
-      <div className="card relative overflow-hidden border-volt/40 px-6 py-12 text-center sm:px-10">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.07]" style={{ backgroundImage: 'repeating-linear-gradient(0deg, #ffd23f 0 1px, transparent 1px 6px)' }} />
-        <h2 className="pixel relative text-2xl sm:text-4xl">EVERY PACK. <span className="text-volt">A PULLBACK.</span></h2>
-        <p className="relative mx-auto mt-4 max-w-lg text-muted">Hold the token, open packs here, and get part of every bad pull back in USDC. Drops and big hits go out on X first.</p>
-        <div className="relative mt-8 grid gap-3 sm:flex sm:justify-center">
-          <a href="#packs" className="btn btn-primary h-12 px-7">Open a pack<ArrowRight size={16} /></a>
-          <a href={X_URL} target="_blank" rel="noreferrer" className="btn btn-outline h-12 px-7"><XLogo size={15} />Follow @{X_HANDLE}</a>
-        </div>
-      </div>
-    </section>
-
-    <Modal open={opening !== null} onClose={close} width="max-w-2xl" label="Opening your pack">
-      {opening && <OpenFlow pack={opening} order={order} batch={batch ? { index: batch.index, count: batch.ids.length } : null} summary={summary} onNext={nextInBatch} onUpdate={setOrder}
+    <Modal open={opening !== null} onClose={close} width="max-w-[56rem]" label="Opening your pack">
+      {opening && <OpenFlow pack={opening} order={order} batch={batch ? { index: batch.index, count: batch.ids.length } : null} batchOrders={batchOrders} onNext={nextInBatch} onSold={onSold}
         onAgain={() => { const p = packs?.find(x => x.code === opening.code), n = batch ? batch.ids.length : 1; close(); if (p) setTimeout(() => open(p, Math.min(n, maxPerOpen)), 50); }} onClose={close} />}
     </Modal>
   </>;
 }
 
-/** Apps that sell Collector Crypt packs: they all pay the same machines, so their packs can be claimed here. */
-const APPS = [['pump.fun', '/apps/pump-fun.svg'], ['Collector Crypt', '/apps/collector-crypt.svg'], ['Jupiter', '/apps/jupiter.svg']] as const;
-
-function CoveredApps({ hours }: { hours: number }) {
-  return <section className="pb-16">
-    <div className="card overflow-hidden">
-      <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-center lg:gap-10">
-        <div>
-          <div className="label">Opened a pack somewhere else?</div>
-          <h2 className="pixel mt-2 text-xl sm:text-2xl">COVERED WHEREVER YOU <span className="text-volt">OPEN</span></h2>
-          <p className="mt-2 max-w-md text-sm text-muted">Collector Crypt packs opened on these apps can be claimed here for a rebate, up to {windowLabel(hours)} after the pull.</p>
-        </div>
-        <ul className="grid grid-cols-2 gap-2 lg:flex lg:items-center" aria-label="Apps whose packs are covered">
-          {APPS.map(([name, logo], i) => <li key={name} className="flex min-w-0 items-center gap-2">
-            {i > 0 && <Plus size={14} className="hidden shrink-0 text-faint lg:block" aria-hidden="true" />}
-            <span className="flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-line bg-raised px-3 lg:flex-none lg:px-3.5"><img src={logo} alt="" className="size-6 shrink-0 object-contain" /><span className="min-w-0 text-[13px] font-semibold leading-tight lg:text-sm">{name}</span></span>
-          </li>)}
-          <li className="flex min-w-0 items-center gap-2">
-            <Plus size={14} className="hidden shrink-0 text-faint lg:block" aria-hidden="true" />
-            <span className="flex h-12 min-w-0 flex-1 items-center gap-2 rounded-lg border border-dashed border-line px-3 text-sm text-muted lg:flex-none lg:px-3.5" title="Solflare, Rarible and other apps that sell Collector Crypt packs"><Plus size={16} className="shrink-0" aria-hidden="true" /><span className="truncate">More apps</span></span>
-          </li>
-        </ul>
+/** The promise, centered, over a hand of real pulls fanned out like cards held up to show. */
+function Hero({ mode, vault, paidBack, opened }: { mode?: string; vault: number | null; paidBack: number | null; opened: number | null }) {
+  const front = useShowcase()?.example, recent = useRecentPulls();
+  const best = [...(recent ?? [])].filter(p => p.card?.image).sort((a, b) => b.valueUsd / b.priceUsd - a.valueUsd / a.priceUsd).slice(0, 4);
+  const spot = (i: number) => ({ translate: `calc(-50% + ${i * 66}%) ${Math.abs(i) * 15}px`, rotate: `${i * 7}deg`, zIndex: 3 - Math.abs(i), animationDelay: `${0.1 + Math.abs(i) * 0.08}s` }) as CSSProperties;
+  const back = front ? Math.floor((25 - front.insuredValueUsd) * 50) / 100 : 7.85;
+  return <section className="pb-14 pt-10 text-center md:pt-16">
+    <div className="enter mx-auto max-w-3xl">
+      <span className="label inline-flex items-center gap-2"><i className="live-dot" />{mode === 'mainnet' ? 'Live on Solana' : mode === 'practice' ? 'Practice mode' : 'Launching on Solana'}</span>
+      <h1 className="font-display mt-4 text-[2.9rem] font-bold leading-[1.04] tracking-tight sm:text-7xl">Every pack gets a <em>second grade.</em></h1>
+      <p className="mx-auto mt-5 max-w-xl text-lg text-muted">Open Collector Crypt packs here. When a card comes in under the pack price, part of the gap lands back in your wallet in USDC, right away.</p>
+      <div className="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
+        <a href="#packs" className="btn btn-primary">See the packs<ArrowDown size={17} /></a>
+        <ContractAddress variant="hero" />
       </div>
-      <Link href="/claim" className="flex items-center justify-between gap-3 border-t border-line px-5 py-3.5 text-sm hover:bg-raised sm:px-6"><span className="pixel text-volt">Claim a pack opened elsewhere</span><ArrowRight size={16} className="text-volt" /></Link>
     </div>
+    <div className="relative mx-auto mt-12 h-[250px] max-w-3xl sm:h-[310px]" aria-hidden="true">
+      {[best[0], best[1], best[2], best[3]].map((p, n) => { const i = [-2, -1, 1, 2][n]; return p?.card ? <div key={p.id} className={`rise absolute bottom-0 left-1/2 w-[34%] sm:w-[190px] ${Math.abs(i) > 1 ? 'hidden sm:block' : ''}`} style={spot(i)}><TradingCard tilt card={{ name: p.card.name, image: p.card.image, insuredValueUsd: p.valueUsd, rarity: null }} /></div> : null; })}
+      <div className="rise absolute bottom-0 left-1/2 w-[38%] sm:w-[205px]" style={spot(0)}>
+        <div className="relative"><TradingCard tilt holo card={front ?? SAMPLE} /><div className="absolute inset-x-0 -bottom-3 z-[4] grid place-items-center"><span className="sticker num">Regraded +{money(back)}</span></div></div>
+      </div>
+    </div>
+    <dl className="mx-auto mt-12 grid max-w-2xl grid-cols-3 divide-x divide-line">
+      <Figure label="In the vault" value={vault} />
+      <Figure label="Paid back" value={paidBack} tone="text-gain" />
+      <Figure label="Packs opened" value={opened} count />
+    </dl>
   </section>;
 }
 
-function Readout({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
-  return <div className="flex min-w-0 items-center justify-between gap-4 px-5 py-4 sm:block sm:px-6 sm:py-5"><div className="label truncate">{label}</div><div className={`pixel num truncate text-xl sm:mt-1.5 sm:text-2xl lg:text-3xl ${tone}`}>{value}</div></div>;
+function Figure({ label, value, tone = '', count = false }: { label: string; value: number | null; tone?: string; count?: boolean }) {
+  const shown = useCount(value);
+  return <div className="min-w-0 px-2"><dt className="label truncate">{label}</dt><dd className={`font-display num mt-0.5 truncate text-xl sm:text-2xl ${tone}`}>{value === null ? '—' : count ? Math.round(shown).toLocaleString('en-US') : money(Math.round(shown * 100) / 100)}</dd></div>;
 }
 
-/** A worked example on a real $25 pull from Collector Crypt, at the visitor's own coverage when they have a tier. */
+/** A worked example on a real $25 pull from Collector Crypt, at the visitor's own terms when they have a grade. */
 function Example({ feeBps, coverageBps, tierName, illustrative }: { feeBps: number; coverageBps: number; tierName: string; illustrative: boolean }) {
   const real = useShowcase()?.example;
-  const card = real ? { name: real.name, image: real.image, insuredValueUsd: real.insuredValueUsd, rarity: real.rarity } : { name: 'Sylveon · Crown Zenith · PSA 9', image: null, insuredValueUsd: 9.3, rarity: 'Common' };
+  const card = real ? { name: real.name, image: real.image, insuredValueUsd: real.insuredValueUsd, rarity: real.rarity } : SAMPLE;
   const price = 25, fee = Math.round(price * feeBps) / 10_000, value = card.insuredValueUsd, rebate = Math.floor((price - value) * coverageBps / 100) / 100;
-  return <div className="card overflow-hidden">
-    <div className="flex items-center justify-between border-b border-line bg-raised px-5 py-2.5"><span className="label">{real ? 'A real $25 pull from Collector Crypt' : 'Example pull'}</span><span className="label hidden sm:inline">{illustrative ? `At ${tierName}` : 'Your tier'}</span></div>
-    <div className="grid gap-6 p-5 sm:grid-cols-[150px_1fr] sm:gap-10 sm:p-8">
-      <div className="mx-auto w-[130px] sm:w-[150px]"><Slab card={card} priceUsd={price} /></div>
-      <div className="min-w-0 self-center">
-        <dl className="grid gap-3 text-sm">
-          <div className="leader"><dt className="text-muted">Pack + protection</dt><dd className="pixel num">{money(price + fee)}</dd></div>
-          <div className="leader"><dt className="text-muted">Card is worth</dt><dd className="pixel num">{money(value)}</dd></div>
-          <div className="leader"><dt className="text-muted">Shortfall</dt><dd className="pixel num text-loss">{money(price - value)}</dd></div>
-          <div className="leader"><dt className="text-muted">{tierName} covers</dt><dd className="pixel num">{pct(coverageBps)}</dd></div>
+  return <div>
+    <SectionTitle title="How a regrade works" sub={`${real ? 'A real $25 pull' : 'An example $25 pull'}, ${illustrative ? `at the ${tierName} grade` : `at your ${tierName} grade`}.`} />
+    <div className="card grid items-center gap-6 p-5 sm:p-7 md:grid-cols-[160px_minmax(0,1fr)_auto] md:gap-10">
+      <div className="mx-auto w-[160px] md:w-full"><TradingCard card={card} priceUsd={price} tilt /></div>
+      <div className="min-w-0">
+        <dl className="grid gap-2.5">
+          <div className="leader"><dt className="text-muted">Pack + {money(fee)} fee</dt><dd className="font-display num">{money(price + fee)}</dd></div>
+          <div className="leader"><dt className="text-muted">Card is worth</dt><dd className="font-display num">{money(value)}</dd></div>
+          <div className="leader"><dt className="text-muted">Under the pack price by</dt><dd className="font-display num text-loss">{money(price - value)}</dd></div>
+          <div className="leader"><dt className="text-muted">{tierName} covers</dt><dd className="font-display num">{pct(coverageBps)}</dd></div>
         </dl>
-        <div className="mt-5 flex items-baseline justify-between border-t border-line pt-4"><span className="pixel">Back to you</span><span className="pixel num text-2xl text-gain sm:text-3xl">+{money(rebate)}</span></div>
-        <div className="mt-5"><RebateBar priceUsd={price} valueUsd={value} rebateUsd={rebate} /></div>
+        <div className="mt-4 flex items-baseline justify-between gap-3 border-t border-line pt-3"><span className="font-display text-lg">Back to you</span><span className="font-display num text-3xl text-gain sm:text-4xl">+{money(rebate)}</span></div>
+        <p className="mt-2 text-sm text-muted">You keep the card. Hold it, or cash it out in one tap.</p>
       </div>
+      <div className="grid place-items-center"><GradeRing priceUsd={price} valueUsd={value} rebateUsd={rebate} /></div>
     </div>
   </div>;
 }
@@ -347,38 +312,49 @@ const clock = (ms: number) => {
   return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
 };
 
-function PackTile({ pack, signedIn, busy, waitMs, count, onOpen }: { pack: Pack; signedIn: boolean; busy: boolean; waitMs: number; count: number; onOpen: () => void }) {
-  const q = pack.quote, cooling = signedIn && waitMs > 0, blocked = signedIn && (!q.protected || cooling), several = signedIn && count > 1;
-  return <article className="group flex min-w-0 flex-col">
-    <Booster code={pack.code} priceUsd={pack.priceUsd} />
-    <div className="mt-4 flex flex-wrap items-baseline justify-between gap-x-2">
-      <span className="pixel num text-lg">{money(q.totalMicros * (several ? count : 1) / 1e6)}</span>
-      {several ? <span className="num text-[11px] text-muted">{count} × {money(q.totalMicros / 1e6)}</span>
-        : q.feeMicros > 0 && <span className="text-[11px] text-muted">incl. {money(q.feeMicros / 1e6)} fee</span>}
+/** One pack: its machine glowing in its element, what it pays out on Collector Crypt, and what it costs this wallet to cover. */
+function PackCard({ pack, stat, signedIn, busy, waitMs, count, onOpen }: { pack: Pack; stat?: PackStats; signedIn: boolean; busy: boolean; waitMs: number; count: number; onOpen: () => void }) {
+  const q = pack.quote, cooling = signedIn && waitMs > 0, blocked = signedIn && (!q.protected || cooling), several = signedIn && count > 1, style = packStyle(pack.code, pack.priceUsd);
+  // Before sign-in there is no tier to quote, so show the range across tiers from the pack's own data.
+  const terms = stat ? Object.values(stat.terms) : [], fees = terms.map(t => t.feeBps), read = !!stat && stat.n > 0;
+  return <article className="card pack-card lift group flex min-w-0 flex-col p-4" style={{ '--glow': style.color } as CSSProperties}>
+    <Booster code={pack.code} priceUsd={pack.priceUsd} className="relative mx-auto w-[80%]" />
+    <div className="relative mt-3 flex items-center justify-between gap-2">
+      <h3 className="font-display flex min-w-0 items-center gap-2 text-lg"><TypeBadge code={pack.code} priceUsd={pack.priceUsd} size={22} /><span className="truncate">{style.name}</span></h3>
+      <span className="font-display num text-lg">${pack.priceUsd}</span>
     </div>
-    <div className="mt-1 min-h-10 text-sm">
-      {q.protected ? <span className="text-gain">Up to <b className="num">{money(q.maxRebateMicros / 1e6)}</b> back{several ? ' each' : ''} · {pct(q.coverageBps)}</span>
-        : signedIn ? <span className="text-xs text-loss">{q.reason}</span> : <span className="text-muted">Connect to see your coverage</span>}
+    {read && <p className="num relative mt-1 text-xs text-muted">Median {money(stat!.medianUsd)} · {Math.round(stat!.hitRate * 100)}% hit rate</p>}
+    <dl className="relative mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3">
+      {signedIn && q.protected ? <>
+        <Term label="Fee" value={short(q.feeBps)} title={`${pct(q.feeBps)} of the pack, ${money(q.feeMicros / 1e6)}`} />
+        <Term label="Cover" value={short(q.coverageBps)} title={q.tier && q.coverageBps < q.tier.onsiteCoverageBps ? `Capped from ${pct(q.tier.onsiteCoverageBps)} on this pack` : undefined} />
+        <Term label="Up to" value={`$${Math.floor(q.maxRebateMicros / 1e6)}`} tone="text-gain" title={`Up to ${money(q.maxRebateMicros / 1e6)} back`} />
+      </> : signedIn ? <p className="col-span-3 text-xs font-medium text-loss">{q.reason}</p>
+        : fees.length ? <>
+          <Term label="Fee from" value={short(Math.min(...fees))} />
+          <Term label="Cover to" value={short(Math.max(...terms.map(t => t.coverageBps)))} />
+          <Term label="Grades" value={String(terms.length)} />
+        </> : <p className="col-span-3 text-xs text-muted">Connect to see your coverage.</p>}
+    </dl>
+    <div className="relative mt-auto pt-3">
+      <button className="btn btn-primary w-full" disabled={busy || blocked} onClick={onOpen}>{cooling ? <>Next in <span className="num">{clock(waitMs)}</span></> : signedIn ? several ? `Open ${count}` : 'Open' : 'Connect to open'}</button>
+      {signedIn && <div className="num mt-1.5 text-center text-[11px] text-muted">{several ? `${count} × ${money(q.totalMicros / 1e6)} = ${money(q.totalMicros * count / 1e6)}` : `${money(q.totalMicros / 1e6)} total`}</div>}
     </div>
-    <button className="btn btn-primary mt-3 w-full" disabled={busy || blocked} onClick={onOpen}>{cooling ? <>Next pack in <span className="num">{clock(waitMs)}</span></> : <>{signedIn ? several ? `Open ${count}` : 'Open' : 'Connect to open'}<ArrowRight size={15} /></>}</button>
   </article>;
+}
+/** A percentage at a size that fits a narrow card: 9.5%, 50%. The exact figure is on hover and at checkout. */
+const short = (bps: number) => `${+(bps / 100).toFixed(1)}%`;
+function Term({ label, value, tone = '', title }: { label: string; value: string; tone?: string; title?: string }) {
+  return <div className="min-w-0" title={title}><dt className="truncate text-[11px] text-muted">{label}</dt><dd className={`font-display num whitespace-nowrap text-sm ${tone}`}>{value}</dd></div>;
 }
 
 type Batch = { ids: string[]; index: number };
-type BatchSummary = { packs: number; paidUsd: number; valueUsd: number; backUsd: number; refunded: number };
 
-/** What a batch came to: refunded packs cost nothing, so they are left out of the totals. */
-function sum(orders: OrderView[]): BatchSummary {
-  const kept = orders.filter(o => o.status !== 'refunded' && o.status !== 'expired');
-  const add = (f: (o: OrderView) => number | null) => Math.round(kept.reduce((t, o) => t + (f(o) ?? 0), 0) * 100) / 100;
-  return { packs: orders.length, paidUsd: add(o => o.totalUsd), valueUsd: add(o => o.valueUsd), backUsd: add(o => o.rebateUsd), refunded: orders.length - kept.length };
-}
+const STEPS = [{ label: 'Paid', at: ['awaiting_payment', 'paying'] }, { label: 'Opened', at: ['paid', 'buying'] }, { label: 'Sent', at: ['delivering'] }, { label: 'Done', at: ['settling'] }];
 
-const STEPS = [{ label: 'Pay', at: ['awaiting_payment', 'paying'] }, { label: 'Open', at: ['paid', 'buying'] }, { label: 'Send', at: ['delivering'] }, { label: 'Rebate', at: ['settling'] }];
-
-function OpenFlow({ pack, order, batch, summary, onNext, onUpdate, onAgain, onClose }: {
-  pack: Pack; order: OrderView | null; batch: { index: number; count: number } | null; summary: BatchSummary | null;
-  onNext: () => void; onUpdate: (o: OrderView) => void; onAgain: () => void; onClose: () => void;
+function OpenFlow({ pack, order, batch, batchOrders, onNext, onSold, onAgain, onClose }: {
+  pack: Pack; order: OrderView | null; batch: { index: number; count: number } | null; batchOrders: OrderView[] | null;
+  onNext: () => void; onSold: (sold: OrderView[]) => void; onAgain: () => void; onClose: () => void;
 }) {
   const priceUsd = pack.priceUsd, status = order?.status, more = !!batch && batch.index < batch.count - 1;
   const step = status === 'complete' ? STEPS.length : STEPS.findIndex(s => s.at.includes(status ?? 'awaiting_payment'));
@@ -387,100 +363,52 @@ function OpenFlow({ pack, order, batch, summary, onNext, onUpdate, onAgain, onCl
   const hit = !!order && order.valueUsd !== null && order.valueUsd >= order.priceUsd;
   const title = status === 'refunding' ? 'Refunding your payment' : status === 'review' ? 'Needs a quick check' : status === 'refunded' ? 'Refunded in full' : status === 'expired' ? 'Payment window closed'
     : revealed ? order!.card!.name.split(' · ')[0] : !order || status === 'awaiting_payment' ? 'Confirm in your wallet' : 'Opening your pack…';
-  return <div className="relative grid gap-6 sm:grid-cols-[210px_1fr] sm:gap-8">
-    {status === 'complete' && hit && <Confetti />}
-    {/* In a batch each pack gets its own machine and plays its reveal, even if it finished while the last one was showing. */}
+  const kept = batchOrders?.filter(o => o.status !== 'refunded' && o.status !== 'expired');
+  const refunded = batchOrders ? batchOrders.length - kept!.length : 0;
+  // A batch cashes out together at its end; a single pack, or one still mid-batch, keeps its own result.
+  const cash = !more ? (kept?.length ? kept : status === 'complete' && order?.card && !batch ? [order] : null) : null;
+  return <div className="grid gap-6 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] md:gap-8">
+    {/* In a batch each pack gets its own reveal, even if it finished while the last one was showing. */}
     <PackOpening key={batch ? order?.id : undefined} replay={!!batch} code={pack.code} priceUsd={priceUsd} status={status} card={order?.card ?? null} hit={hit} rebateUsd={order?.rebateUsd ?? null} />
-    <div className="min-w-0">
-      <div className="label pr-8">{batch && `Pack ${batch.index + 1} of ${batch.count} · `}{money(priceUsd)} {packStyle(pack.code, priceUsd).name} pack · {pct(order?.coverageBps ?? pack.quote.coverageBps ?? 0)} covered</div>
-      <h2 className="pixel mt-1.5 text-2xl" aria-live="polite">{title}</h2>
-      {revealed && <p className="text-sm text-muted">{order!.card!.name.split(' · ').slice(1).join(' · ')}</p>}
+    <div className="min-w-0 self-center">
+      <div className="flex items-center gap-2 pr-8"><TypeBadge code={pack.code} priceUsd={priceUsd} size={22} /><span className="label">{batch && `Pack ${batch.index + 1} of ${batch.count} · `}{packStyle(pack.code, priceUsd).name} ${priceUsd} · {pct(order?.coverageBps ?? pack.quote.coverageBps ?? 0)} covered</span></div>
+      <h2 className="font-display mt-2 text-3xl font-bold leading-[1.1] tracking-tight sm:text-4xl" aria-live="polite">{title}</h2>
+      {revealed && <p className="mt-1 text-sm text-muted">{order!.card!.name.split(' · ').slice(1).join(' · ')}</p>}
 
-      {!failed && <ol className="mt-5 grid grid-cols-4 gap-1.5">
+      {!failed && <ol className="mt-5 grid grid-cols-4 gap-2">
         {STEPS.map((s, i) => <li key={s.label}>
-          <div className={`h-1.5 rounded-[2px] ${i < step ? 'bg-gain' : i === step ? 'blink bg-volt' : 'bg-raised'}`} />
-          <div className={`pixel mt-1.5 flex items-center gap-1 text-[11px] uppercase tracking-[0.08em] ${i < step ? 'text-gain' : i === step ? 'text-volt' : 'text-faint'}`}>{i < step && <Check size={11} />}{s.label}</div>
+          <div className={`h-1.5 rounded-full transition-colors duration-500 ${i < step ? 'bg-accent' : i === step ? 'animate-pulse bg-accent/50' : 'bg-raised'}`} />
+          <div className={`label mt-1.5 ${i < step ? 'text-ink' : i === step ? 'text-accent' : ''}`}>{s.label}</div>
         </li>)}
       </ol>}
 
-      {order && order.valueUsd !== null && !failed && <div className="enter mt-6">
-        <div className="grid grid-cols-3 gap-3">
-          <Mini label="You paid" value={money(order.totalUsd)} />
-          <Mini label="Card value" value={money(order.valueUsd)} tone={hit ? 'text-gain' : ''} />
-          <Mini label="Back to you" value={hit ? 'None' : order.rebateUsd === null ? '…' : `+${money(order.rebateUsd)}`} tone={hit ? 'text-muted' : 'text-gain'} />
-        </div>
-        {order.rebateUsd !== null && !hit && <div className="mt-5"><RebateBar priceUsd={order.priceUsd} valueUsd={order.valueUsd} rebateUsd={order.rebateUsd} /></div>}
-        {status === 'complete' && hit && <p className="mt-4 rounded-md border border-volt/40 bg-volt-soft px-4 py-3 text-sm text-volt">A hit! This one beat the pack price, so no rebate was needed.</p>}
+      {order && order.valueUsd !== null && !failed && <div className="enter mt-5 flex items-center gap-5">
+        <GradeRing priceUsd={order.priceUsd} valueUsd={order.valueUsd} rebateUsd={order.rebateUsd ?? 0} size={112} />
+        <dl className="grid min-w-0 flex-1 gap-1.5 text-sm">
+          <div className="leader"><dt className="text-muted">You paid</dt><dd className="font-display num">{money(order.totalUsd)}</dd></div>
+          <div className="leader"><dt className="text-muted">Card value</dt><dd className={`font-display num ${hit ? 'text-gain' : ''}`}>{money(order.valueUsd)}</dd></div>
+          <div className="leader"><dt className="text-muted">Back to you</dt><dd className={`font-display num ${hit ? 'text-muted' : 'text-gain'}`}>{hit ? 'Not needed' : order.rebateUsd === null ? '…' : `+${money(order.rebateUsd)}`}</dd></div>
+        </dl>
       </div>}
 
-      {status === 'complete' && order?.card && <QuickSell order={order} onSold={onUpdate} />}
+      {status && status !== 'complete' && <p className={`mt-4 text-sm ${status === 'review' ? 'text-loss' : 'text-muted'}`}>{status === 'review' ? 'Your payment is safe. The team has been alerted and will finish this order.' : order?.message}</p>}
+      {more && status === 'complete' && <p className="mt-4 text-sm text-muted">{order?.message} You can cash out the whole batch after the last pack.</p>}
+      {batch && !more && !kept && status === 'complete' && <p className="mt-4 text-sm text-muted">Adding up the batch…</p>}
 
-      {!(status === 'complete' && hit) && <p className={`mt-4 text-sm ${status === 'review' ? 'text-loss' : 'text-muted'}`}>{status === 'review' ? 'Your payment is safe. The team has been alerted and will finish this order.' : order?.message}</p>}
+      {kept && !more && <div className="enter mt-5"><div className="label">{batchOrders!.length} packs{refunded ? ` · ${refunded} refunded` : ''}</div></div>}
+      {cash && <CashOut orders={cash} onSold={onSold} />}
 
-      <div className="mt-4 flex flex-wrap gap-4 text-xs">
+      <div className="mt-4 flex flex-wrap gap-4 text-xs font-semibold">
         {([['Payment', order?.paymentSignature], ['Card transfer', order?.nftSignature], ['Rebate', order?.rebateSignature], ['Refund', order?.refundSignature]] as const).filter(([, s]) => s).map(([label, s]) =>
-          <a key={label} className="inline-flex items-center gap-0.5 text-muted hover:text-volt" href={solscan('tx', s!)} target="_blank" rel="noreferrer">{label}<ArrowUpRight size={12} /></a>)}
+          <a key={label} className="inline-flex items-center gap-0.5 text-muted hover:text-accent" href={solscan('tx', s!)} target="_blank" rel="noreferrer">{label}<ArrowUpRight size={12} /></a>)}
       </div>
 
-      {summary && !more && <div className="enter mt-6 rounded-lg border border-line bg-raised p-4">
-        <div className="label">{summary.packs} packs{summary.refunded ? ` · ${summary.refunded} refunded` : ''}</div>
-        <div className="mt-3 grid grid-cols-3 gap-3">
-          <Mini label="You paid" value={money(summary.paidUsd)} />
-          <Mini label="Cards worth" value={money(summary.valueUsd)} tone={summary.valueUsd >= summary.paidUsd ? 'text-gain' : ''} />
-          <Mini label="Back to you" value={summary.backUsd ? `+${money(summary.backUsd)}` : 'None'} tone={summary.backUsd ? 'text-gain' : 'text-muted'} />
-        </div>
-      </div>}
-
-      <div className="mt-6 flex flex-wrap gap-2">
+      <div className="mt-5 flex flex-wrap gap-2">
         {more && status && FINAL.includes(status) ? <button className="btn btn-primary" onClick={onNext}>Next pack ({batch!.index + 2} of {batch!.count})<ArrowRight size={15} /></button>
           : status === 'complete' && <button className="btn btn-primary" onClick={onAgain}>{batch ? `Open ${batch.count} more` : 'Open another'}</button>}
+        {status === 'complete' && order?.card && <ShareButton id={order.id} />}
         <button className="btn btn-outline" onClick={onClose}>{status && FINAL.includes(status) && !more ? 'Done' : 'Close'}</button>
       </div>
     </div>
   </div>;
-}
-
-type SaleQuote = { available: boolean; amountUsd: number | null; expiresAt: number | null };
-
-/** Collector Crypt's sell-back offer for the card just pulled, signed by the buyer's own wallet. */
-function QuickSell({ order, onSold }: { order: OrderView; onSold: (o: OrderView) => void }) {
-  const { config, me, notify } = useApp();
-  const [quote, setQuote] = useState<SaleQuote | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (order.sale) return;
-    api<SaleQuote>(`/orders/${order.id}/sell`).then(setQuote).catch(() => setQuote({ available: false, amountUsd: null, expiresAt: null }));
-  }, [order.id, order.sale]);
-  if (order.sale) return <div className="enter mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md border border-water/40 bg-water/10 px-4 py-3 text-sm">
-    <span>Sold back for <b className="pixel text-water">{money(order.sale.amountUsd)}</b>. The USDC is in your wallet.</span>
-    <a className="inline-flex items-center gap-0.5 text-xs text-muted hover:text-volt" href={solscan('tx', order.sale.signature)} target="_blank" rel="noreferrer">Sale<ArrowUpRight size={12} /></a>
-  </div>;
-  if (!quote?.available || quote.amountUsd === null) return null;
-  async function sell() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const practice = config?.mode === 'practice' && !hasSigner();
-      if (!practice && me.wallet) await ensureSigner(me.wallet);
-      const offer = await api<{ transaction: string; amountUsd: number }>(`/orders/${order.id}/sell`, {});
-      const signed = practice ? offer.transaction : await signPayment(offer.transaction);
-      onSold(await api<OrderView>(`/orders/${order.id}/sell/submit`, { signed }));
-      notify(`Sold for ${money(offer.amountUsd)}.`);
-    } catch (e) { notify(friendly(e as Error)); } finally { setBusy(false); }
-  }
-  const hours = quote.expiresAt ? Math.max(0, Math.round((quote.expiresAt - Date.now()) / 3_600_000)) : null;
-  const share = order.valueUsd ? Math.round(quote.amountUsd / order.valueUsd * 100) : null;
-  return <div className="enter mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-raised p-4">
-    <div className="min-w-0"><div className="label">Quick sell</div><div className="mt-0.5 text-sm text-muted">Sell it back to Collector Crypt{share ? ` at ${share}% of its value` : ''}{hours !== null ? `. Offer open ${hours}h more.` : '.'}</div></div>
-    <button className="btn btn-outline btn-sm" disabled={busy} onClick={sell}>{busy ? 'Selling…' : `Sell for ${money(quote.amountUsd)}`}</button>
-  </div>;
-}
-
-const CONFETTI = ['#ffd23f', '#45d483', '#4aa3ff', '#ff8a4c', '#c77dff'];
-function Confetti() {
-  return <div className="confetti" aria-hidden="true">{Array.from({ length: 28 }, (_, i) =>
-    <i key={i} style={{ left: `${(i * 37) % 100}%`, background: CONFETTI[i % CONFETTI.length], animationDelay: `${(i % 7) * 70}ms` }} />)}</div>;
-}
-function Mini({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
-  return <div className="min-w-0"><div className="label truncate">{label}</div><div className={`pixel num mt-1 truncate text-sm sm:text-lg ${tone}`}>{value}</div></div>;
 }

@@ -1,5 +1,6 @@
-export const X_HANDLE = 'pullbackcards';
-export const X_URL = `https://x.com/${X_HANDLE}`;
+import { BRAND } from '../../../shared/brand';
+
+const handle = BRAND.xHandle;
 
 /** The X wordmark; lucide only ships the old bird. */
 export function XLogo({ size = 16, className = '' }: { size?: number; className?: string }) {
@@ -8,10 +9,8 @@ export function XLogo({ size = 16, className = '' }: { size?: number; className?
   </svg>;
 }
 
-/** `icon`: a round header button. `row`: the mobile menu line. `inline`: a footer link. */
-export function XLink({ variant, className = '' }: { variant: 'icon' | 'row' | 'inline'; className?: string }) {
-  const label = `Follow @${X_HANDLE} on X`;
-  if (variant === 'icon') return <a href={X_URL} target="_blank" rel="noreferrer" aria-label={label} title={label} className={`size-9 place-items-center rounded-md text-muted hover:bg-raised hover:text-ink ${className}`}><XLogo size={15} /></a>;
-  if (variant === 'row') return <a href={X_URL} target="_blank" rel="noreferrer" className={`flex h-12 items-center gap-3 px-4 text-sm hover:text-volt ${className}`}><XLogo size={15} /><span>Follow <span className="font-semibold">@{X_HANDLE}</span></span></a>;
-  return <a href={X_URL} target="_blank" rel="noreferrer" aria-label={label} className={`inline-flex w-fit items-center gap-1.5 hover:text-ink ${className}`}><XLogo size={12} />@{X_HANDLE}</a>;
+/** The brand's X account, as a footer link. Renders nothing until `BRAND.xHandle` is set. */
+export function XLink({ className = '' }: { variant?: 'inline'; className?: string }) {
+  if (!handle) return null;
+  return <a href={`https://x.com/${handle}`} target="_blank" rel="noreferrer" aria-label={`Follow @${handle} on X`} className={`inline-flex w-fit items-center gap-1.5 hover:text-ink ${className}`}><XLogo size={12} />@{handle}</a>;
 }

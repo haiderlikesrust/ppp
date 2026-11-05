@@ -1,4 +1,4 @@
-import type { HolderTier, Quote, Settings } from './types';
+import type { HolderTier, PackRisk, Quote, Settings } from './types';
 
 /** All money is integer micro-USDC (6 decimals). */
 export const MICROS = 1_000_000;
@@ -9,11 +9,12 @@ const bps = (amount: number, rate: number) => Math.floor(amount * rate / 10_000)
 export const DEFAULT_SETTINGS: Settings = {
   paused: false,
   feeBps: 1_000,
-  poolShareBps: 5_000,
+  pricing: { enabled: true, marginBps: 1_500, minFeeBps: 300, maxFeeBps: 2_500, minSamples: 500 },
+  poolShareBps: 8_000,
   tiers: [
-    { id: 't1', name: 'Shrimp', minSupplyPpm: 1_000, onsiteCoverageBps: 2_500, offsiteCoverageBps: 2_000 },
-    { id: 't2', name: 'Dolphin', minSupplyPpm: 10_000, onsiteCoverageBps: 5_000, offsiteCoverageBps: 3_500 },
-    { id: 't3', name: 'Whale', minSupplyPpm: 20_000, onsiteCoverageBps: 10_000, offsiteCoverageBps: 6_000 },
+    { id: 't1', name: 'Near Mint', minSupplyPpm: 1_000, onsiteCoverageBps: 2_500, offsiteCoverageBps: 2_000 },
+    { id: 't2', name: 'Mint', minSupplyPpm: 10_000, onsiteCoverageBps: 5_000, offsiteCoverageBps: 3_500 },
+    { id: 't3', name: 'Gem Mint', minSupplyPpm: 20_000, onsiteCoverageBps: 10_000, offsiteCoverageBps: 6_000 },
   ],
   walletTiers: [],
   cooldown: { minutes: 0, wallets: [] },
@@ -80,14 +81,31 @@ export function offsiteRebateCapMicros(s: Settings) {
 /** The largest rebate an on-site order can ever cost: coverage of the whole price, capped. */
 export const maxLiability = (priceMicros: number, coverageBps: number, capMicros: number) => Math.min(capMicros, bps(priceMicros, coverageBps));
 
-export function quote(priceUsd: number, tier: HolderTier | null, settings: Settings, poolFreeMicros: number, code = `pokemon_${priceUsd}`): Quote {
-  const priceMicros = micros(priceUsd), feeMicros = bps(priceMicros, settings.feeBps);
-  const base = { priceMicros, feeMicros, totalMicros: priceMicros + feeMicros, tier };
+/**
+ * The fee and coverage a tier gets on one pack, set from that pack's real pulls so the pool collects what the
+ * coverage costs on average, plus the margin. Above the top fee, coverage is cut (to a whole percent) to what that
+ * fee pays for, so an expensive pack never turns into a loss for the pool. Null keeps the flat fee: pricing is off,
+ * or the pack has too few pulls to trust.
+ */
+export function riskTerms(coverageBps: number, risk: PackRisk | null | undefined, s: Pick<Settings, 'pricing' | 'poolShareBps'>) {
+  const p = s.pricing;
+  if (!p.enabled || !risk || risk.n < p.minSamples || s.poolShareBps <= 0) return null;
+  const load = risk.expectedLossRatio * (10_000 + p.marginBps) / s.poolShareBps;
+  const fee = Math.ceil(coverageBps * load);
+  if (fee <= p.maxFeeBps) return { feeBps: Math.max(p.minFeeBps, fee), coverageBps };
+  return { feeBps: p.maxFeeBps, coverageBps: Math.min(coverageBps, Math.floor(p.maxFeeBps / load / 100) * 100) };
+}
+
+export function quote(priceUsd: number, tier: HolderTier | null, settings: Settings, poolFreeMicros: number, code = `pokemon_${priceUsd}`, risk?: PackRisk | null): Quote {
+  const priced = tier ? riskTerms(tier.onsiteCoverageBps, risk, settings) : null;
+  const feeBps = priced?.feeBps ?? settings.feeBps;
+  const priceMicros = micros(priceUsd), feeMicros = bps(priceMicros, feeBps);
+  const base = { priceMicros, feeMicros, feeBps, totalMicros: priceMicros + feeMicros, tier, riskPriced: !!priced };
   const none = (reason: string): Quote => ({ ...base, coverageBps: 0, maxRebateMicros: 0, protected: false, reason });
   if (settings.paused) return none('Protection is paused.');
   if (settings.pausedPacks.includes(code)) return none('Protection for this pack is paused.');
   if (!tier) return none('Hold more of the token to qualify for protection.');
-  const coverageBps = tier.onsiteCoverageBps, maxRebate = maxLiability(priceMicros, coverageBps, micros(settings.maxRebateUsd));
+  const coverageBps = priced?.coverageBps ?? tier.onsiteCoverageBps, maxRebate = maxLiability(priceMicros, coverageBps, micros(settings.maxRebateUsd));
   if (maxRebate > poolFreeMicros) return none('The protection pool is full right now. Try a smaller pack or check back soon.');
   return { ...base, coverageBps, maxRebateMicros: maxRebate, protected: true, reason: null };
 }
@@ -141,6 +159,10 @@ export function settingsProblems(s: Settings, calibration: Distribution[] = [], 
   if (new Set(s.walletTiers.map(e => e.wallet)).size !== s.walletTiers.length) problems.push('Each wallet can have only one tier exception.');
   if (new Set(s.cooldown.wallets.map(c => c.wallet)).size !== s.cooldown.wallets.length) problems.push('Each wallet can have only one cooldown.');
   if (s.poolShareBps < 0 || s.poolShareBps > 10_000) problems.push('Pool share must be between 0% and 100%.');
+  if (s.pricing.enabled && s.pricing.minFeeBps > s.pricing.maxFeeBps) problems.push('The lowest fee cannot be above the highest fee.');
+  if (s.pricing.enabled && s.poolShareBps <= 0) problems.push('Risk pricing needs part of the fee to reach the pool.');
+  // Risk pricing sets each pack's fee from its own pulls, so the flat-fee guardrail only applies with it off.
+  if (s.pricing.enabled) return problems;
   // Fee guardrail: only enforced once calibration data exists for a price.
   const subsidy = packsPerDay > 0 ? Math.floor(s.creatorFeeBudgetUsdPerDay * 10_000 / packsPerDay) : 0;
   for (const d of calibration) {

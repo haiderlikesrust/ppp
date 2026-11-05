@@ -12,7 +12,7 @@ test('holder tiers use share of supply with inclusive boundaries', () => {
   assert.equal(holderTier(ofSupply(9_999), supply, tiers)?.id, 't1');
   assert.equal(holderTier(ofSupply(10_000), supply, tiers)?.id, 't2', 'Collector at 1%');
   assert.equal(holderTier(ofSupply(19_999), supply, tiers)?.id, 't2');
-  assert.equal(holderTier(ofSupply(20_000), supply, tiers)?.id, 't3', 'Whale at 2%');
+  assert.equal(holderTier(ofSupply(20_000), supply, tiers)?.id, 't3', 'the top tier starts at 2%');
   assert.equal(holderTier(ofSupply(50_000), supply, tiers)?.id, 't3');
   assert.equal(holderTier(ofSupply(50_000), 0n, tiers), null);
 });
@@ -66,8 +66,10 @@ test('calibration math: expected loss counts only losses, and the guardrail flag
   assert.equal(requiredFeeBps(10_000, 0.25, 5_000, 2_500), 0, 'a subsidy can cover it');
   assert.equal(requiredFeeBps(10_000, 0.25, 0), Infinity);
   const big = Array.from({ length: 40 }, (_, i) => ({ priceUsd: 25, valueUsd: i % 2 ? 10 : 40 }));
-  assert.ok(settingsProblems(DEFAULT_SETTINGS, distribution(big)).some(p => /needs a fee/.test(p)));
-  assert.deepEqual(settingsProblems(DEFAULT_SETTINGS), []);
+  const flat = { ...DEFAULT_SETTINGS, pricing: { ...DEFAULT_SETTINGS.pricing, enabled: false } };
+  assert.ok(settingsProblems(flat, distribution(big)).some(p => /needs a fee/.test(p)));
+  assert.deepEqual(settingsProblems(flat), []);
+  assert.deepEqual(settingsProblems(DEFAULT_SETTINGS, distribution(big)), [], 'risk pricing sets each fee from the pulls, so a flat fee has nothing to fail');
 });
 
 test('settings validation keeps off-site coverage below on-site and tiers monotonic', () => {

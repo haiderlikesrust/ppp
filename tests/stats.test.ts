@@ -42,8 +42,8 @@ test('the pull feed stores each pull once and keeps the newest, with photos, for
   const recent = feed.recent();
   assert.deepEqual(recent.map(p => p.valueUsd), [22, 140, 31], 'newest first');
   assert.equal(recent[0].card?.name, 'Psyduck · Mew EN-151 · PSA 10', 'the full name is used, not the cut-off one');
-  assert.ok(recent[1].pullback, 'a pack opened by our OPS wallet is marked');
-  assert.ok(!recent[0].pullback);
+  assert.ok(recent[1].onSite, 'a pack opened by our OPS wallet is marked');
+  assert.ok(!recent[0].onSite);
 
   const stored = (await s.db.query<{ code: string; value_cents: number; card: unknown }>('SELECT code,value_cents,card FROM cc_pulls ORDER BY value_cents')).rows;
   assert.deepEqual(stored.map(r => [r.code, r.value_cents, !!r.card]), [['pokemon_25', 2200, false], ['pokemon_50', 3100, false], ['pokemon_50', 14000, true]], `only pulls over ${HIT_MULTIPLE}× the pack keep their card`);
@@ -65,7 +65,7 @@ test('pack stats use the calibration math and price each tier with the same reba
   assert.equal(p.p90Usd, d.p90 * 50);
   assert.equal(p.hitRate, d.hitRate);
   assert.equal(p.meanUsd, Math.round(d.meanValueRatio * 50 * 100) / 100);
-  // Shortfalls 40 + 30 + 10 = 80 over 7 pulls: Whale (100%) gets 80/7, Shrimp (25%) a quarter of it.
+  // Shortfalls 40 + 30 + 10 = 80 over 7 pulls: Whale (100%) gets 80/7, the bottom tier (25%) a quarter of it.
   assert.deepEqual(p.avgRebateUsd, { t1: 2.86, t2: 5.71, t3: 11.43 });
   assert.equal(p.best?.valueUsd, 120, 'the $900 hit is over a week old, so the best of the last 7 days is $120');
   assert.equal(p.best?.card?.name, 'Psyduck · Mew EN-151 · PSA 10');
@@ -74,7 +74,7 @@ test('pack stats use the calibration math and price each tier with the same reba
   assert.equal(empty.n, 0);
   assert.equal(empty.best, null);
 
-  // The $500 cap binds for a Whale on a $500 pack.
+  // The $500 cap binds for the top tier on a $500 pack.
   await s.settings.save({ ...s.settings.current, maxRebateUsd: 100 });
   const big = new PullFeed(s.db, s.settings, () => null, feedOf({ pokemon_500: [winner('pokemon_500', 100, now - 1000)] }).fetcher);
   await big.poll(now);
@@ -136,7 +136,7 @@ test('leaderboards rank this week’s hits, packs opened and rebates, and mark t
   await s.db.close();
 });
 
-test('Just pulled lists packs finished on Pullback, newest first, with the rebate sent and a short card name', async () => {
+test('Just pulled lists packs finished on Regrade, newest first, with the rebate sent and a short card name', async () => {
   const s = await setup(), a = await user(s);
   const open = async (code: string, valueUsd: number, rebateUsd: number, name?: string) => {
     const { order } = await s.orders.create(a.wallet, code);
@@ -164,7 +164,7 @@ test('Just pulled lists packs finished on Pullback, newest first, with the rebat
   assert.match(pulls[1].wallet, /^\w{4}…\w{4}$/, 'wallets are shortened');
 
   const { app } = await createApp({ services: s, timers: false, logger: false });
-  assert.deepEqual((await app.inject({ url: '/api/pulls/pullback' })).json().items.map((p: { id: string }) => p.id), [second, first]);
+  assert.deepEqual((await app.inject({ url: '/api/pulls/site' })).json().items.map((p: { id: string }) => p.id), [second, first]);
   await app.close();
 });
 

@@ -25,7 +25,7 @@ test('happy path: pay, buy, deliver, auto-rebate, fee split, reservation release
   s.pool.invalidate();
   assert.equal(await s.pool.balance(), poolBefore - expected, 'rebate paid from the pool');
   const ledger = (await s.db.query("SELECT bucket,kind,amount_micros::text AS a FROM ledger WHERE ref=$1 ORDER BY id", [order.id])).rows;
-  assert.deepEqual(ledger.filter(r => r.kind === 'fee-share').map(r => [r.bucket, Number(r.a)]).sort(), [['burn', 1_250_000], ['pool', 1_250_000]]);
+  assert.deepEqual(ledger.filter(r => r.kind === 'fee-share').map(r => [r.bucket, Number(r.a)]).sort(), [['burn', 500_000], ['pool', 2_000_000]]);
   assert.equal(Number((await s.db.query("SELECT rebate_micros::text AS r FROM pulls WHERE order_id=$1", [order.id])).rows[0].r), expected);
   await s.db.close();
 });
@@ -54,7 +54,7 @@ test('a tier exception lets a wallet open packs at its tier whatever it holds; a
   await assert.rejects(s.orders.create(other.wallet, 'pokemon_50'), /Hold more|lowest balance/, 'no exception, no tier');
 
   const { order } = await s.orders.create(granted.wallet, 'pokemon_50');
-  assert.equal(order.coverageBps, 10_000, 'quoted at the granted Whale tier with no holdings');
+  assert.equal(order.coverageBps, 10_000, 'quoted at the granted top tier with no holdings');
   assert.deepEqual([order.feeUsd, order.totalUsd], [0, 50], 'exception wallets pay no protection fee');
   assert.equal((await s.orders.quotes(granted.wallet)).find(p => p.code === 'pokemon_50')?.quote.feeMicros, 0);
   assert.equal((await s.orders.quotes(other.wallet)).find(p => p.code === 'pokemon_50')?.quote.feeMicros, 5_000_000, 'and only them');
@@ -65,7 +65,7 @@ test('a tier exception lets a wallet open packs at its tier whatever it holds; a
   const view = await s.holders.view(granted.wallet, granted.activatedAt);
   assert.equal(view.tier?.id, 't3', 'the site shows the granted tier for packs opened here');
   assert.equal(view.heldTier, null, 'and the held tier for claims, which go by holdings');
-  assert.equal((await s.orders.create(holder.wallet, 'pokemon_50')).order.coverageBps, 10_000, 'a Whale holder given a Shrimp exception stays a Whale');
+  assert.equal((await s.orders.create(holder.wallet, 'pokemon_50')).order.coverageBps, 10_000, 'a top-tier holder given a lower exception stays top tier');
 
   assert.throws(() => settingsSchema.parse({ ...s.settings.current, walletTiers: [{ wallet: 'not a wallet', tierId: 't3' }] }));
   assert.match(settingsProblems({ ...s.settings.current, walletTiers: [{ wallet: granted.wallet, tierId: 'gone' }] }).join(' '), /tier that no longer exists/);
@@ -122,7 +122,7 @@ test('several packs are refused up front when the pool, the wallet or a cooldown
   await assert.rejects(s.orders.createMany(wallet, 'pokemon_25', 6), /between 1 and 5/);
   s.solana.usdc.set(s.solana.poolAddress, BigInt(micros(60)));
   s.pool.invalidate();
-  await assert.rejects(s.orders.createMany(wallet, 'pokemon_25', 3), /can cover 2 of these packs right now\. Try 2/, 'each $25 Whale pack can need $25');
+  await assert.rejects(s.orders.createMany(wallet, 'pokemon_25', 3), /can cover 2 of these packs right now\. Try 2/, 'each $25 top-tier pack can need $25');
   assert.equal((await s.orders.createMany(wallet, 'pokemon_25', 2)).orders.length, 2);
 
   await s.settings.save({ ...s.settings.current, cooldown: { minutes: 0, wallets: [{ wallet: slow.wallet, minutes: 10 }] } });
@@ -211,11 +211,11 @@ test('the breaker counts fee-free packs at the listed fee, so a fee waiver alone
   const rebate = (usd: number) => s.db.query("UPDATE orders SET data = data || jsonb_build_object('rebateMicros', $1::bigint)", [micros(usd)]);
   await rebate(20);
   await s.settings.save({ ...s.settings.current, breaker: { lossRatioBps: 100_000, minPacks: 2, windowDays: 7 } });
-  // At the listed 10% fee, each $100 pack would have put $5 into the pool: $20 back on each is 400%.
+  // At the listed 10% fee, each $100 pack would have put $8 into the pool: $20 back on each is 250%.
   const stats = (await s.pool.byPack()).find(r => r.code === 'pokemon_100')!;
-  assert.deepEqual([stats.feesMicros, stats.lossRatioBps, stats.breakerRatioBps], [0, Infinity, 40_000], 'the real ratio stays real');
-  assert.equal(await s.pool.checkBreaker('pokemon_100'), false, '400% is under the 1,000% limit');
-  await rebate(60);
-  assert.equal(await s.pool.checkBreaker('pokemon_100'), true, '1,200% at the listed fee still pauses it');
+  assert.deepEqual([stats.feesMicros, stats.lossRatioBps, stats.breakerRatioBps], [0, Infinity, 25_000], 'the real ratio stays real');
+  assert.equal(await s.pool.checkBreaker('pokemon_100'), false, '250% is under the 1,000% limit');
+  await rebate(100);
+  assert.equal(await s.pool.checkBreaker('pokemon_100'), true, '1,250% at the listed fee still pauses it');
   await s.db.close();
 });

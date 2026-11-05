@@ -100,7 +100,7 @@ test('saved tiers with earlier default names get the new names; custom names sta
   const tiers = [{ id: 't1', name: 'Holder', minSupplyPpm: 1_000, onsiteCoverageBps: 2_500, offsiteCoverageBps: 2_000 }, { id: 't2', name: 'Gym Leader', minSupplyPpm: 10_000, onsiteCoverageBps: 5_000, offsiteCoverageBps: 3_500 }, { id: 't3', name: 'Kraken', minSupplyPpm: 20_000, onsiteCoverageBps: 10_000, offsiteCoverageBps: 6_000 }];
   await db.query('INSERT INTO settings(id,data) VALUES(1,$1)', [JSON.stringify({ tiers })]);
   const settings = await new SettingsStore(db).load();
-  assert.deepEqual(settings.tiers.map(t => t.name), ['Shrimp', 'Dolphin', 'Kraken']);
+  assert.deepEqual(settings.tiers.map(t => t.name), ['Near Mint', 'Mint', 'Kraken']);
   await db.close();
 });
 

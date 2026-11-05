@@ -1,11 +1,11 @@
 {
-  "name": "Pullback",
-  "short_name": "Pullback",
-  "description": "Bad pull? Pull back.",
+  "name": "Regrade",
+  "short_name": "Regrade",
+  "description": "Every pack gets a second grade.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0d0f13",
-  "theme_color": "#0d0f13",
+  "background_color": "#f5f6fa",
+  "theme_color": "#f5f6fa",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }

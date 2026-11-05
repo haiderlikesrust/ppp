@@ -16,7 +16,7 @@ const short = (wallet: string) => `${wallet.slice(0, 4)}…${wallet.slice(-4)}`;
 const packCode = (data: any, priceMicros: string) => (data?.packCode as string | undefined) ?? (data?.packType as string | undefined) ?? `pokemon_${usd(Number(priceMicros))}`;
 
 /**
- * This week's (or last week's) Pullback boards: the most valuable cards pulled here, the wallets that
+ * This week's (or last week's) boards: the most valuable cards pulled here, the wallets that
  * opened the most packs here, and the biggest single rebates, on-site and off-site. Wallets are shortened;
  * `you` marks the viewer's own rows.
  */
@@ -53,21 +53,31 @@ export async function leaderboard(db: Database, week: 'current' | 'last', viewer
 }
 
 /**
- * The newest packs opened on Pullback, with the card, the rebate it sent and every transaction behind it,
+ * The newest packs opened on Regrade, with the card, the rebate it sent and every transaction behind it,
  * so anyone can check them on-chain. Collector Crypt titles are cut to the card's name.
  */
 export async function sitePulls(db: Database, limit = 24): Promise<SitePull[]> {
-  const rows = (await db.query<{ id: string; wallet: string; price_micros: string; payment_signature: string | null; data: any; created_at: string }>(
+  const rows = (await db.query<PullRow>(
     `SELECT id,wallet,price_micros::text,payment_signature,data,created_at::text FROM orders
      WHERE status='complete' AND data ? 'valueMicros' ORDER BY created_at DESC LIMIT $1`, [limit])).rows;
-  return rows.map(r => {
-    const d = r.data, name = d.card?.name ? String(d.card.name) : null;
-    return {
-      id: r.id, code: packCode(d, r.price_micros), priceUsd: usd(Number(r.price_micros)), valueUsd: usd(Number(d.valueMicros)),
-      rebateUsd: usd(Number(d.rebateMicros ?? 0)), at: Number(r.created_at), wallet: short(r.wallet), mint: d.card?.mint ?? null,
-      card: name ? { name: name.includes(' · ') ? name : cardTitle(name), image: d.card.image ?? null } : null,
-      soldUsd: d.sale ? usd(Number(d.sale.amountMicros)) : null,
-      txs: { payment: r.payment_signature, pack: d.packSignature ?? null, card: d.nftSignature ?? null, rebate: d.rebateSignature ?? null, sale: d.sale?.signature ?? null },
-    };
-  });
+  return rows.map(toSitePull);
+}
+
+/** One finished pull by its order id, for its public page and share card. */
+export async function sitePull(db: Database, id: string): Promise<SitePull | null> {
+  const row = (await db.query<PullRow>(`SELECT id,wallet,price_micros::text,payment_signature,data,created_at::text FROM orders WHERE id=$1 AND status='complete' AND data ? 'valueMicros'`, [id])).rows[0];
+  return row ? toSitePull(row) : null;
+}
+
+type PullRow = { id: string; wallet: string; price_micros: string; payment_signature: string | null; data: any; created_at: string };
+
+function toSitePull(r: PullRow): SitePull {
+  const d = r.data, name = d.card?.name ? String(d.card.name) : null;
+  return {
+    id: r.id, code: packCode(d, r.price_micros), priceUsd: usd(Number(r.price_micros)), valueUsd: usd(Number(d.valueMicros)),
+    rebateUsd: usd(Number(d.rebateMicros ?? 0)), at: Number(r.created_at), wallet: short(r.wallet), mint: d.card?.mint ?? null,
+    card: name ? { name: name.includes(' · ') ? name : cardTitle(name), image: d.card.image ?? null } : null,
+    soldUsd: d.sale ? usd(Number(d.sale.amountMicros)) : null,
+    txs: { payment: r.payment_signature, pack: d.packSignature ?? null, card: d.nftSignature ?? null, rebate: d.rebateSignature ?? null, sale: d.sale?.signature ?? null },
+  };
 }

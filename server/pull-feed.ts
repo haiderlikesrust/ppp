@@ -1,6 +1,6 @@
 import { SELLING, type PackDef } from '../shared/packs';
-import { distribution, maxLiability, micros, rebateMicros, usd } from '../shared/protection';
-import type { FeedPull, PackStats, StatsView } from '../shared/types';
+import { distribution, maxLiability, micros, rebateMicros, riskTerms, usd } from '../shared/protection';
+import type { FeedPull, PackRisk, PackStats, StatsView } from '../shared/types';
 import type { Database } from './db';
 import type { SettingsStore } from './settings';
 import { fromWinner, toCard } from './showcase';
@@ -18,7 +18,7 @@ const HITS_KEPT = 50;
 const RECENT_KEPT = 60;
 
 /**
- * Reads Collector Crypt's public feed of recent pulls for every machine Pullback sells. Each pull's
+ * Reads Collector Crypt's public feed of recent pulls for every machine Regrade sells. Each pull's
  * value is stored compactly for the pack stats, which use the same `distribution()` as the
  * calibration script; the newest pulls, with their card photos, are kept in memory for the live feed.
  * The feed returns each machine's latest 200 pulls, so polling every 2 minutes misses almost none.
@@ -70,22 +70,32 @@ export class PullFeed {
       const best = (await this.db.query<{ id: string; value_cents: number; pulled_at: string; card: FeedPull['card'] }>('SELECT id,value_cents,pulled_at::text,card FROM cc_pulls WHERE code=$1 AND card IS NOT NULL AND pulled_at>=$2 ORDER BY value_cents DESC, pulled_at DESC LIMIT 1', [def.code, now - 7 * DAY])).rows[0];
       const [d] = distribution(rows.map(r => ({ priceUsd: def.priceUsd, valueUsd: r.value_cents / 100 })));
       const price = micros(def.priceUsd), cents = (ratio: number) => Math.round(ratio * def.priceUsd * 100) / 100;
-      // The rebate each tier would have got on these exact pulls, with the same cap a real order has.
+      const risk = { n: rows.length, expectedLossRatio: d?.expectedLossRatio ?? 0 };
+      const terms = Object.fromEntries(s.tiers.map(t => {
+        const priced = riskTerms(t.onsiteCoverageBps, risk, s);
+        return [t.id, priced ? { ...priced, riskPriced: true } : { feeBps: s.feeBps, coverageBps: t.onsiteCoverageBps, riskPriced: false }];
+      }));
+      // The rebate each tier would have got on these exact pulls, with the same coverage and cap a real order has.
       const avgRebateUsd = Object.fromEntries(s.tiers.map(t => {
-        const cap = maxLiability(price, t.onsiteCoverageBps, micros(s.maxRebateUsd));
-        const total = rows.reduce((sum, r) => sum + rebateMicros(price, r.value_cents * 10_000, t.onsiteCoverageBps, cap), 0);
+        const coverage = terms[t.id].coverageBps, cap = maxLiability(price, coverage, micros(s.maxRebateUsd));
+        const total = rows.reduce((sum, r) => sum + rebateMicros(price, r.value_cents * 10_000, coverage, cap), 0);
         return [t.id, rows.length ? Math.round(usd(total / rows.length) * 100) / 100 : 0];
       }));
       packs.push({
         code: def.code, priceUsd: def.priceUsd, n: rows.length, since: rows.length ? Number(rows[rows.length - 1].pulled_at) : null,
         medianUsd: d ? cents(d.medianValueRatio) : 0, meanUsd: d ? cents(d.meanValueRatio) : 0, p10Usd: d ? cents(d.p10) : 0, p90Usd: d ? cents(d.p90) : 0,
-        hitRate: d?.hitRate ?? 0, avgRebateUsd,
-        best: best ? { id: best.id, mint: best.id.split(':')[0], code: def.code, priceUsd: def.priceUsd, valueUsd: best.value_cents / 100, at: Number(best.pulled_at), card: best.card, pullback: false } : null,
+        hitRate: d?.hitRate ?? 0, expectedLossRatio: risk.expectedLossRatio, terms, avgRebateUsd,
+        best: best ? { id: best.id, mint: best.id.split(':')[0], code: def.code, priceUsd: def.priceUsd, valueUsd: best.value_cents / 100, at: Number(best.pulled_at), card: best.card, onSite: false } : null,
       });
     }
     const value = { packs, updatedAt: this.polledAt };
     this.cache = { at: now, value };
     return value;
+  }
+
+  /** What each pack costs to protect, from the same pulls the stats use. Orders price from this. */
+  async risks(): Promise<Map<string, PackRisk>> {
+    return new Map((await this.stats()).packs.map(p => [p.code, { n: p.n, expectedLossRatio: p.expectedLossRatio }]));
   }
 
   /** Keeps each pack's newest sample, plus its biggest recent hits so the best of the week survives. */
@@ -109,5 +119,5 @@ export function parsePull(w: any, def: PackDef, opsAddress: string | null): Feed
   const at = Date.parse(w?.created_at), value = Number(w?.insuredValue), mint = w?.nft_address;
   if (w?.pack_type !== def.code || typeof mint !== 'string' || !Number.isFinite(at) || !Number.isFinite(value) || value <= 0) return null;
   const card = toCard(fromWinner(w));
-  return { id: `${mint}:${at}`, mint, code: def.code, priceUsd: def.priceUsd, valueUsd: value, at, card: card ? { name: card.name, image: card.image } : null, pullback: !!opsAddress && w?.winner === opsAddress };
+  return { id: `${mint}:${at}`, mint, code: def.code, priceUsd: def.priceUsd, valueUsd: value, at, card: card ? { name: card.name, image: card.image } : null, onSite: !!opsAddress && w?.winner === opsAddress };
 }

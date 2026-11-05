@@ -23,7 +23,7 @@ test('health checks the database and stays available under frequent probes', asy
     unavailable = true;
     const failure = await app.inject('/api/health');
     assert.equal(failure.statusCode, 503);
-    assert.deepEqual(failure.json(), { ok: false, service: 'pullback' });
+    assert.deepEqual(failure.json(), { ok: false, service: 'regrade' });
     unavailable = false;
     const ok = (await app.inject('/api/health')).json();
     assert.equal(ok.spendingEnabled, false);
@@ -60,7 +60,7 @@ test('outside practice mode the practice API does not exist and admin needs the 
   try {
     assert.equal((await app.inject({ method: 'POST', url: '/api/practice/login', payload: {} })).statusCode, 404);
     const { token } = await createSession(s.db, Keypair.generate().publicKey.toBase58());
-    const admin = await app.inject({ url: '/api/admin', cookies: { pp_session: token } });
+    const admin = await app.inject({ url: '/api/admin', cookies: { rg_session: token } });
     assert.equal(admin.statusCode, 403);
   } finally { await app.close(); }
 });

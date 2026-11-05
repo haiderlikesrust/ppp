@@ -52,10 +52,10 @@ export async function createServices(options: { db?: Database; solana?: Solana; 
   }
   const holders = new Holders(db, solana, settings), pool = new Pool(db, solana, settings);
   const gas = new Gas(db, jobs, solana, pool, settings);
-  const orders = new Orders(db, jobs, solana, packs, holders, pool, settings, gas);
+  const feed = new PullFeed(db, settings, () => solana.opsAddress, options.fetcher);
+  const orders = new Orders(db, jobs, solana, packs, holders, pool, settings, gas, () => feed.risks());
   const claims = new Claims(db, solana, packs, holders, pool, settings);
   const treasury = new Treasury(db, jobs, solana, pool, settings);
-  const feed = new PullFeed(db, settings, () => solana.opsAddress, options.fetcher);
   return { db, jobs, settings, solana, packs, holders, pool, gas, orders, claims, treasury, feed, serial: new Serial(), practice: solana instanceof MockSolana };
 }
 

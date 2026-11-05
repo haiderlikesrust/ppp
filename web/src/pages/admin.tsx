@@ -35,23 +35,30 @@ export function AdminPage() {
 
   return <div className="grid gap-6 py-10">
     <div className="flex flex-wrap items-end justify-between gap-4">
-      <div><div className="label">Owner</div><h1 className="pixel mt-1 text-4xl sm:text-5xl">CONTROL ROOM</h1></div>
+      <div><div className="label">Owner</div><h1 className="font-display mt-1 text-5xl font-bold tracking-tight">Control room</h1></div>
       <button className="btn btn-outline" onClick={() => act('/admin/treasury/run', {}, 'Ran fee transfer, burn and creator-fee collection.')}>Run treasury tasks</button>
     </div>
 
     <div className="card p-6">
       <div className="label mb-3">Launch readiness</div>
       <ul className="grid gap-2 text-sm">
-        {data.blockers.map(b => <li key={b} className="flex items-center gap-2"><AlertTriangle size={15} className="text-volt" />{b}</li>)}
+        {data.blockers.map(b => <li key={b} className="flex items-center gap-2"><AlertTriangle size={15} className="text-warn" />{b}</li>)}
         {!data.blockers.length && <li className="flex items-center gap-2 text-gain"><CheckCircle2 size={15} />Ready for mainnet.</li>}
         {data.problems.map(p => <li key={p} className="flex items-start gap-2 text-loss"><AlertTriangle size={15} className="mt-0.5 shrink-0" />{p}</li>)}
       </ul>
     </div>
 
-    <Section title="Pricing" sub="The fee is added on top of the pack price. Part goes to the pool, the rest buys back and burns the token.">
+    <Section title="Pricing" sub="The fee is added on top of the pack price. Part goes to the vault, the rest buys back and burns the token.">
+      <div className="mb-5 grid gap-4 sm:grid-cols-5">
+        <Field label="Risk pricing" hint="Sets each pack's fee from its pulls"><Toggle checked={form.pricing.enabled} onChange={v => set('pricing', { ...form.pricing, enabled: v })} label="On" /></Field>
+        <Field label="Margin %" hint="Above the expected rebate"><input className="input num" type="number" step="1" value={form.pricing.marginBps / 100} onChange={e => set('pricing', { ...form.pricing, marginBps: Math.round(n(e.target.value) * 100) })} /></Field>
+        <Field label="Lowest fee %"><input className="input num" type="number" step="0.5" value={form.pricing.minFeeBps / 100} onChange={e => set('pricing', { ...form.pricing, minFeeBps: Math.round(n(e.target.value) * 100) })} /></Field>
+        <Field label="Highest fee %" hint="Coverage is cut to fit under this"><input className="input num" type="number" step="0.5" value={form.pricing.maxFeeBps / 100} onChange={e => set('pricing', { ...form.pricing, maxFeeBps: Math.round(n(e.target.value) * 100) })} /></Field>
+        <Field label="Pulls needed" hint="Fewer keeps the flat fee"><input className="input num" type="number" step="50" value={form.pricing.minSamples} onChange={e => set('pricing', { ...form.pricing, minSamples: n(e.target.value) })} /></Field>
+      </div>
       <div className="grid gap-4 sm:grid-cols-4">
-        <Field label="Protection fee %"><input className="input num" type="number" step="0.5" value={form.feeBps / 100} onChange={e => set('feeBps', Math.round(n(e.target.value) * 100))} /></Field>
-        <Field label="Fee to pool %" hint={`${pct(10_000 - form.poolShareBps)} to burn`}><input className="input num" type="number" step="5" value={form.poolShareBps / 100} onChange={e => set('poolShareBps', Math.round(n(e.target.value) * 100))} /></Field>
+        <Field label="Flat fee %" hint={form.pricing.enabled ? 'Only for packs without enough pulls' : 'Every pack'}><input className="input num" type="number" step="0.5" value={form.feeBps / 100} onChange={e => set('feeBps', Math.round(n(e.target.value) * 100))} /></Field>
+        <Field label="Fee to vault %" hint={`${pct(10_000 - form.poolShareBps)} to burn`}><input className="input num" type="number" step="5" value={form.poolShareBps / 100} onChange={e => set('poolShareBps', Math.round(n(e.target.value) * 100))} /></Field>
         <Field label="Max rebate / pack $"><input className="input num" type="number" value={form.maxRebateUsd} onChange={e => set('maxRebateUsd', n(e.target.value))} /></Field>
         <Field label="Creator fees / day $" hint="Subsidy the fee check counts on"><input className="input num" type="number" value={form.creatorFeeBudgetUsdPerDay} onChange={e => set('creatorFeeBudgetUsdPerDay', n(e.target.value))} /></Field>
       </div>
@@ -156,7 +163,7 @@ export function AdminPage() {
 
     <Section title="Delayed orders" sub="Paid orders that hit an error and are retrying on their own, waiting longer each time. After about 3 hours of failures they move to review.">
       {data.delayed.length ? <div className="divide-y divide-line">{data.delayed.map(o => <div key={o.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
-        <code className="num text-muted">{o.id.slice(0, 8)}</code><span className="tag bg-volt-soft text-ink">{o.status}</span>
+        <code className="num text-muted">{o.id.slice(0, 8)}</code><span className="tag bg-accent-soft text-ink">{o.status}</span>
         <span className="num text-xs text-muted">{o.failures} attempt{o.failures === 1 ? '' : 's'}{Number(o.retry_at) > Date.now() ? ` · next in ${Math.ceil((Number(o.retry_at) - Date.now()) / 1000)}s` : ' · retrying now'}</span>
         <span className="min-w-0 flex-1 basis-64 break-words text-loss">{o.error}</span>
         <button className="btn btn-outline btn-sm" onClick={() => act(`/admin/orders/${o.id}/retry-now`, {}, 'Retrying on the next pass.')}>Retry now</button>
@@ -177,7 +184,7 @@ export function AdminPage() {
       </div>)}</div>
     </Section>
 
-    {dirty && <div className="enter sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-30 mx-auto lg:bottom-5 flex w-fit items-center gap-3 rounded-lg border border-volt/40 bg-raised py-2 pl-5 pr-2 text-sm shadow-2xl">
+    {dirty && <div className="enter sticky bottom-[calc(1rem+env(safe-area-inset-bottom))] z-30 mx-auto flex w-fit items-center gap-3 rounded-full bg-surface py-2 pl-5 pr-2 text-sm font-semibold shadow-[var(--shadow-lift)] md:bottom-5">
       Unsaved changes<button className="btn btn-quiet btn-sm" disabled={saving} onClick={() => setForm(data.settings)}>Discard</button><button className="btn btn-primary btn-sm" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
     </div>}
   </div>;

@@ -14,6 +14,14 @@ function pull(s: Awaited<ReturnType<typeof setup>>, wallet: string, loss: boolea
   }
 }
 const losingPull = (s: Awaited<ReturnType<typeof setup>>, wallet: string, hoursAgo = 1) => pull(s, wallet, true, hoursAgo);
+/** A pull that lost at least $5, so its rebate reaches a small cap whatever value the card rolled. */
+function bigLoss(s: Awaited<ReturnType<typeof setup>>, wallet: string) {
+  for (;;) {
+    const p = losingPull(s, wallet);
+    if (p.card.insuredValueUsd! <= 20) return p;
+    s.solana.ccPayments.set(wallet, s.solana.ccPayments.get(wallet)!.filter(x => x.memo !== p.memo));
+  }
+}
 
 test('an eligible off-site pull is scanned, claimed and paid at the lower off-site coverage', async () => {
   const s = await setup(), { wallet, activatedAt } = await user(s, 10_000, 48);
@@ -117,7 +125,7 @@ test('refunded packs, winning pulls and old pulls are rejected', async () => {
 test('the per-wallet weekly cap queues claims instead of paying them', async () => {
   const s = await setup({ offsite: { ...DEFAULT_SETTINGS.offsite, perWalletWeeklyUsd: 1 } });
   const { wallet, activatedAt } = await user(s, 20_000, 48);
-  const first = losingPull(s, wallet), second = losingPull(s, wallet);
+  const first = bigLoss(s, wallet), second = bigLoss(s, wallet);
   await s.claims.claim(wallet, activatedAt, first.memo);
   // A wallet cannot stack up more unpaid claims than its cap could ever pay.
   await assert.rejects(s.claims.claim(wallet, activatedAt, second.memo), /waiting to be paid/);

@@ -1,4 +1,4 @@
-# Deploy Pullback on Dokploy
+# Deploy Regrade on Dokploy
 
 Use a **Docker Compose** service sourced from this Git repository. The stack runs three containers:
 
@@ -14,11 +14,11 @@ Dokploy's Traefik terminates HTTPS in front of the gateway. The server and datab
 
 1. Push the project to your repository. In Dokploy create a **Docker Compose** service (not Docker Stack/Swarm) from it, branch `main`, and set **Compose Path** to `./compose.dokploy.yaml`. If the repository contains a `pokinsurance/` subfolder, use `pokinsurance/compose.dokploy.yaml` instead.
 2. In **Environment**, paste [`deploy/dokploy.env.example`](../deploy/dokploy.env.example) and fill it in:
-   - `APP_ORIGIN`: the exact public HTTPS origin, `https://pullback.cards`, with no trailing slash. Sign-in messages and the origin check on every write use it, so it must match the address people open.
+   - `APP_ORIGIN`: the exact public HTTPS origin, `https://regrade.cards`, with no trailing slash. Sign-in messages and the origin check on every write use it, so it must match the address people open.
    - `POSTGRES_PASSWORD`: long and alphanumeric only (`openssl rand -hex 32`). Required even before launch.
    - Leave `MAINNET_ENABLED=false` for the first deploy.
 3. Add the wallet keys here when you are ready: `OPS_PRIVATE_KEY` and `POOL_PRIVATE_KEY`, two different wallets, as base58 secret keys or quoted JSON arrays of 64 bytes. They are runtime variables of the **server** container only. No keypair file, build argument or public variable is used.
-4. In **Domains**, add `pullback.cards`, choose service **gateway**, container port **80**, path **/**, and enable **HTTPS / Let's Encrypt**. Point the domain's DNS at the VPS. Add `packprotection.xyz` (the previous domain) and, if you use it, `www.pullback.cards` the same way: the gateway redirects both to `https://pullback.cards`.
+4. In **Domains**, add `regrade.cards`, choose service **gateway**, container port **80**, path **/**, and enable **HTTPS / Let's Encrypt**. Point the domain's DNS at the VPS. Add `packprotection.xyz` (the previous domain) and, if you use it, `www.pullback.cards` the same way: the gateway redirects both to `https://regrade.cards`.
 5. Deploy. In Preview Compose, confirm the gateway has both `app` and `dokploy-network`. Wait for the postgres, server and gateway health checks before opening the domain.
 
 Compose maps each variable explicitly, so the frontend never sees the environment. `.dockerignore` keeps local `.env` files, keys, databases, the `video/` project and test files out of the images.
@@ -27,7 +27,7 @@ Compose maps each variable explicitly, so the frontend never sees the environmen
 
 - Open `/api/health`: expect `ok: true`, `database: "postgres"`, `mode: "read-only"` and `spendingEnabled: false` before launch. A database failure returns HTTP 503.
 - Open `/`, `/claim`, `/pool`, `/docs` and `/admin`; check that the fonts load.
-- Connect a wallet and sign in. Under HTTPS the `pp_session` cookie is Secure and HttpOnly. Sign in with `OWNER_WALLET` to open `/admin`; any other wallet gets "Owner access required".
+- Connect a wallet and sign in. Under HTTPS the `rg_session` cookie is Secure and HttpOnly. Sign in with `OWNER_WALLET` to open `/admin`; any other wallet gets "Owner access required".
 - `/admin` → **Launch readiness** lists what is still missing.
 
 Production never runs practice mode. Without `SOLANA_RPC_URL` the site runs **read-only**: pages and sign-in work, nothing is bought or paid, and the practice endpoints do not exist.
@@ -72,9 +72,9 @@ Full production stack on a Linux Docker engine (Docker Desktop works):
 
 ```sh
 docker network create dokploy-network
-APP_ORIGIN=http://127.0.0.1:8080 POSTGRES_PASSWORD=localTestOnly docker compose -p pullback-ci -f compose.dokploy.yaml -f compose.ci.yaml up -d --build --wait
+APP_ORIGIN=http://127.0.0.1:8080 POSTGRES_PASSWORD=localTestOnly docker compose -p regrade-ci -f compose.dokploy.yaml -f compose.ci.yaml up -d --build --wait
 SMOKE_TEST_FIXTURE=true APP_ORIGIN=http://127.0.0.1:8080 npm run smoke:dokploy
-docker compose -p pullback-ci -f compose.dokploy.yaml -f compose.ci.yaml down -v
+docker compose -p regrade-ci -f compose.dokploy.yaml -f compose.ci.yaml down -v
 ```
 
 `compose.ci.yaml` only publishes the gateway on `127.0.0.1:8080` for testing. GitHub Actions (`.github/workflows/verify.yml`) runs the same steps on every push: tests, typecheck, build, then the full three-container stack against a fresh disposable database with mainnet off, checked through Nginx by `scripts/smoke-dokploy.mjs`. Wait for **Verify app and Dokploy stack** to pass before your first VPS deployment.

@@ -4,8 +4,14 @@ export type HolderTier = { id: string; name: string; minSupplyPpm: number; onsit
 export type Settings = {
   /** Stops new orders, claim payouts, burns and fee routing. In-flight orders still settle or refund. */
   paused: boolean;
-  /** On-site protection fee on top of the pack price. 1000 = 10%. */
+  /** Flat on-site fee on top of the pack price, used until a pack has enough pull data to be priced. 1000 = 10%. */
   feeBps: number;
+  /**
+   * Prices each pack from its real pulls: the fee pays the pool the expected rebate at that coverage, plus `marginBps`.
+   * Fees stay between `minFeeBps` and `maxFeeBps`; when the top fee can't pay for a tier's coverage, coverage on that
+   * pack comes down to what it can pay for. A pack with fewer than `minSamples` pulls keeps the flat fee.
+   */
+  pricing: { enabled: boolean; marginBps: number; minFeeBps: number; maxFeeBps: number; minSamples: number };
   /** Fixed split of every on-site fee. The pool gets this share; the rest goes to buyback-and-burn. */
   poolShareBps: number;
   tiers: HolderTier[];
@@ -67,7 +73,14 @@ export type Quote = {
   priceMicros: number; feeMicros: number; totalMicros: number;
   coverageBps: number; maxRebateMicros: number; tier: HolderTier | null;
   protected: boolean; reason: string | null;
+  /** The fee as a share of the pack price. */
+  feeBps: number;
+  /** True when this pack's fee and coverage were set from its pull data, not the flat fee. */
+  riskPriced: boolean;
 };
+
+/** What a pack's pull history says it costs to protect. `expectedLossRatio` = E[max(0, price - value)] / price. */
+export type PackRisk = { n: number; expectedLossRatio: number };
 
 export type OrderStatus = 'awaiting_payment' | 'paying' | 'paid' | 'buying' | 'delivering' | 'settling' | 'refunding' | 'complete' | 'refunded' | 'expired' | 'review';
 
@@ -103,9 +116,9 @@ export type HolderView = {
 };
 
 /** A pull from Collector Crypt's public feed. `mint` is the card's NFT, so anyone can look it up on-chain. */
-export type FeedPull = { id: string; mint: string; code: string; priceUsd: number; valueUsd: number; at: number; card: { name: string; image: string } | null; pullback: boolean };
+export type FeedPull = { id: string; mint: string; code: string; priceUsd: number; valueUsd: number; at: number; card: { name: string; image: string } | null; onSite: boolean };
 /**
- * A pack opened on Pullback: the card that came out, the rebate actually sent back, and the transactions
+ * A pack opened on Regrade: the card that came out, the rebate actually sent back, and the transactions
  * behind it (the buyer's payment, our purchase on Collector Crypt, the card sent to the buyer, the rebate,
  * and a quick sale if there was one). The wallet is shortened.
  */
@@ -121,12 +134,28 @@ export type PackStats = {
   medianUsd: number; meanUsd: number; p10Usd: number; p90Usd: number;
   /** Share of pulls worth at least the pack price. */
   hitRate: number;
-  /** Average rebate per pack opened on Pullback, by tier id, at today's settings. */
+  /** Share of the pack price the average pull falls short by. What the pack costs to protect at 100% coverage. */
+  expectedLossRatio: number;
+  /** What each tier pays and gets on this pack today, by tier id. */
+  terms: Record<string, { feeBps: number; coverageBps: number; riskPriced: boolean }>;
+  /** Average rebate per pack opened on Regrade, by tier id, at today's fee and coverage. */
   avgRebateUsd: Record<string, number>;
   /** Best pull of the last 7 days, if one beat 2× the pack price. */
   best: FeedPull | null;
 };
 export type StatsView = { packs: PackStats[]; updatedAt: number | null };
+
+/** One finished pull in a wallet's portfolio: a pack opened here, or an off-site pack paid through a claim. */
+export type PortfolioItem = {
+  id: string; source: 'onsite' | 'offsite'; code: string; priceUsd: number; feeUsd: number; valueUsd: number; rebateUsd: number; soldUsd: number | null;
+  /** Sale or held value, plus the rebate, minus what the pull cost. */
+  netUsd: number; at: number; card: { name: string; image: string | null; mint: string | null } | null;
+};
+/** Everything a wallet pulled, and how it came out overall. Cards not sold count at their insured value. */
+export type Portfolio = {
+  totals: { pulls: number; spentUsd: number; feesUsd: number; rebatesUsd: number; soldUsd: number; heldUsd: number; heldCards: number; hits: number; netUsd: number };
+  items: PortfolioItem[];
+};
 
 export type LeaderWallet = { wallet: string; you: boolean };
 export type Leaderboard = {

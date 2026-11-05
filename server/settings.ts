@@ -11,6 +11,7 @@ const cooldownMinutes = z.number().finite().min(0).max(7 * 24 * 60);
 export const settingsSchema: z.ZodType<Settings> = z.object({
   paused: z.boolean(),
   feeBps: z.number().int().min(0).max(5_000),
+  pricing: z.object({ enabled: z.boolean(), marginBps: z.number().int().min(0).max(10_000), minFeeBps: z.number().int().min(0).max(5_000), maxFeeBps: z.number().int().min(0).max(5_000), minSamples: z.number().int().min(1).max(5_000) }),
   poolShareBps: bps,
   tiers: z.array(z.object({ id: z.string().min(1).max(16), name: z.string().trim().min(1).max(24), minSupplyPpm: z.number().int().min(1).max(1_000_000), onsiteCoverageBps: bps, offsiteCoverageBps: bps })).min(1).max(8),
   walletTiers: z.array(z.object({ wallet: walletAddress, tierId: z.string().min(1).max(16) })).max(100),
@@ -45,7 +46,7 @@ export const settingsSchema: z.ZodType<Settings> = z.object({
 const RULES = 3;
 
 /** Earlier default tier names, renamed on load. Names an owner typed themselves are left alone. */
-const RENAMED_TIERS: Record<string, string> = { Holder: 'Shrimp', Trainer: 'Shrimp', Collector: 'Dolphin', 'Gym Leader': 'Dolphin', Champion: 'Whale' };
+const RENAMED_TIERS: Record<string, string> = { Holder: 'Near Mint', Trainer: 'Near Mint', Shrimp: 'Near Mint', Collector: 'Mint', 'Gym Leader': 'Mint', Dolphin: 'Mint', Champion: 'Gem Mint', Whale: 'Gem Mint' };
 
 export class SettingsStore {
   current: Settings = DEFAULT_SETTINGS;
@@ -65,7 +66,7 @@ export class SettingsStore {
       ...(before2 && row.data.offsite?.claimWindowHours === 24 ? { claimWindowHours: 48 } : {}),
       ...(before3 ? { perWalletDailyClaims: 0, perWalletDailyUsd: 0, perWalletWeeklyUsd: 0 } : {}),
     };
-    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, ...legacy, ...moved, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite, ...movedOffsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker }, cooldown: { ...DEFAULT_SETTINGS.cooldown, ...row.data.cooldown }, gas: { ...DEFAULT_SETTINGS.gas, ...row.data.gas } }) : DEFAULT_SETTINGS;
+    this.current = row ? settingsSchema.parse({ ...DEFAULT_SETTINGS, ...row.data, ...legacy, ...moved, offsite: { ...DEFAULT_SETTINGS.offsite, ...row.data.offsite, ...movedOffsite }, breaker: { ...DEFAULT_SETTINGS.breaker, ...row.data.breaker }, pricing: { ...DEFAULT_SETTINGS.pricing, ...row.data.pricing }, cooldown: { ...DEFAULT_SETTINGS.cooldown, ...row.data.cooldown }, gas: { ...DEFAULT_SETTINGS.gas, ...row.data.gas } }) : DEFAULT_SETTINGS;
     return this.current;
   }
   async save(settings: Settings) {

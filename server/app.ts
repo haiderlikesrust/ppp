@@ -1,6 +1,9 @@
 import Fastify from 'fastify';
 import { ShowcaseSource } from './showcase';
-import { leaderboard, sitePulls } from './leaderboard';
+import { leaderboard, sitePull, sitePulls } from './leaderboard';
+import { portfolio } from './portfolio';
+import { fetchCardImage } from './remote-metadata';
+import { sharePage } from './share';
 import { MAX_PER_OPEN } from './orders';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
@@ -20,7 +23,7 @@ import { settingsSchema, settingsVersion } from './settings';
 import { settingsProblems } from '../shared/protection';
 import { publicError, redact } from './redact';
 
-const COOKIE = 'pp_session';
+const COOKIE = 'rg_session';
 const wallet = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
 
 export function originAllowed(method: string, origin: string | undefined, fetchSite: string | undefined, appOrigin: string) {
@@ -43,7 +46,7 @@ export async function createApp(options: { services?: Services; timers?: boolean
   const { db, serial } = s;
 
   app.addHook('onRequest', async (req, reply) => { if (!originAllowed(req.method, req.headers.origin, req.headers['sec-fetch-site'] as string | undefined, config.APP_ORIGIN)) return reply.code(403).send({ error: 'Request origin is not allowed.' }); });
-  app.addHook('onSend', async (req, reply, payload) => { if (req.url.startsWith('/api')) reply.header('Cache-Control', 'no-store'); reply.header('X-Content-Type-Options', 'nosniff').header('X-Frame-Options', 'DENY').header('Referrer-Policy', 'no-referrer'); return payload; });
+  app.addHook('onSend', async (req, reply, payload) => { if (req.url.startsWith('/api') && !reply.getHeader('Cache-Control')) reply.header('Cache-Control', 'no-store'); reply.header('X-Content-Type-Options', 'nosniff').header('X-Frame-Options', 'DENY').header('Referrer-Policy', 'no-referrer'); return payload; });
   app.setErrorHandler((error, req, reply) => {
     const e = error as Error & { statusCode?: number };
     if (e instanceof z.ZodError) return reply.code(400).send({ error: 'Check the submitted fields.', fields: e.issues.map(i => i.path.join('.')) });
@@ -62,8 +65,8 @@ export async function createApp(options: { services?: Services; timers?: boolean
   const setSession = (reply: any, token: string) => reply.setCookie(COOKIE, token, { path: '/', httpOnly: true, sameSite: 'strict', secure: config.APP_ORIGIN.startsWith('https:'), maxAge: 86_400 });
 
   app.get('/api/health', { config: { rateLimit: false } }, async (_req, reply) => {
-    try { await db.query('SELECT 1'); } catch { return reply.code(503).send({ ok: false, service: 'pullback' }); }
-    return { ok: true, service: 'pullback', mode: s.practice ? 'practice' : config.live ? 'mainnet' : 'read-only', database: config.DATABASE_URL ? 'postgres' : 'embedded-postgres', spendingEnabled: config.live && !s.settings.current.paused };
+    try { await db.query('SELECT 1'); } catch { return reply.code(503).send({ ok: false, service: 'regrade' }); }
+    return { ok: true, service: 'regrade', mode: s.practice ? 'practice' : config.live ? 'mainnet' : 'read-only', database: config.DATABASE_URL ? 'postgres' : 'embedded-postgres', spendingEnabled: config.live && !s.settings.current.paused };
   });
   app.get('/api/config', async () => ({ mode: s.practice ? 'practice' : config.live ? 'mainnet' : 'read-only', mint: s.solana.holderMint, poolAddress: s.solana.poolAddress, opsAddress: s.solana.opsAddress, settings: publicSettings(s) }));
 
@@ -138,7 +141,23 @@ export async function createApp(options: { services?: Services; timers?: boolean
   // Collector Crypt's pack images and one real card, for the site's artwork.
   app.get('/api/showcase', async () => showcase.get());
   app.get('/api/pulls/recent', async () => ({ items: s.feed.recent(24) }));
-  app.get('/api/pulls/pullback', async () => ({ items: await sitePulls(db, 24) }));
+  app.get('/api/pulls/site', async () => ({ items: await sitePulls(db, 24) }));
+  const shared = async (id: string) => {
+    const pull = await sitePull(db, z.string().uuid().parse(id));
+    if (!pull) throw Object.assign(new Error('That pull could not be found.'), { statusCode: 404 });
+    return pull;
+  };
+  // One pull, public like the receipts on the stats page. Its share link, its page and its share card read from here.
+  app.get('/api/pulls/:id', async req => shared((req.params as { id: string }).id));
+  app.get('/api/pulls/:id/image', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const pull = await shared((req.params as { id: string }).id);
+    if (!pull.card?.image) throw Object.assign(new Error('This pull has no photo.'), { statusCode: 404 });
+    const image = await fetchCardImage(pull.card.image);
+    return reply.header('Cache-Control', 'public, max-age=86400').type(image.type).send(image.bytes);
+  });
+  // The link people post: a link preview for crawlers that sends visitors on to /pull/:id.
+  app.get('/s/:id', async (req, reply) => reply.type('text/html; charset=utf-8').send(sharePage(await shared((req.params as { id: string }).id), config.APP_ORIGIN)));
+  app.get('/api/portfolio', async req => { const session = await auth(req); return portfolio(db, session.wallet); });
   app.get('/api/stats', async () => s.feed.stats());
   app.get('/api/leaderboard', async req => {
     const { week } = z.object({ week: z.enum(['current', 'last']).default('current') }).parse(req.query);
@@ -174,15 +193,16 @@ export async function createApp(options: { services?: Services; timers?: boolean
     return { settings: s.settings.current, version: settingsVersion(s.settings.current) };
   });
   // Quick sell: Collector Crypt's sell-back for a card from a finished order.
-  app.get('/api/orders/:id/sell', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async req => {
+  app.get('/api/orders/:id/sell', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req); const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     return s.orders.sellQuote(session.wallet, id);
   });
-  app.post('/api/orders/:id/sell', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
+  // Cash out sells a whole batch at once, one request per card.
+  app.post('/api/orders/:id/sell', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req); const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     return s.orders.sellStart(session.wallet, id);
   });
-  app.post('/api/orders/:id/sell/submit', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
+  app.post('/api/orders/:id/sell/submit', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async req => {
     const session = await auth(req); const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const { signed } = z.object({ signed: z.string().min(1).max(4_000) }).parse(req.body);
     return s.orders.sellSubmit(session.wallet, id, signed);
@@ -265,5 +285,5 @@ export async function createApp(options: { services?: Services; timers?: boolean
 
 function publicSettings(s: Services) {
   const c = s.settings.current;
-  return { feeBps: c.feeBps, poolShareBps: c.poolShareBps, tiers: c.tiers, maxRebateUsd: c.maxRebateUsd, offsiteHoldHours: c.offsiteHoldHours, onsiteHoldHours: c.onsiteHoldHours, offsiteActivationHours: c.offsiteActivationHours, offsite: { enabled: c.offsite.enabled, claimWindowHours: c.offsite.claimWindowHours, perWalletDailyClaims: c.offsite.perWalletDailyClaims, perWalletDailyUsd: c.offsite.perWalletDailyUsd, perWalletWeeklyUsd: c.offsite.perWalletWeeklyUsd, dailyPoolBps: c.offsite.dailyPoolBps, targetReserveUsd: c.offsite.targetReserveUsd }, breaker: c.breaker, pausedPacks: c.pausedPacks, paused: c.paused, gas: { maxUsdPerDay: c.gas.maxUsdPerDay } };
+  return { feeBps: c.feeBps, pricing: c.pricing, poolShareBps: c.poolShareBps, tiers: c.tiers, maxRebateUsd: c.maxRebateUsd, offsiteHoldHours: c.offsiteHoldHours, onsiteHoldHours: c.onsiteHoldHours, offsiteActivationHours: c.offsiteActivationHours, offsite: { enabled: c.offsite.enabled, claimWindowHours: c.offsite.claimWindowHours, perWalletDailyClaims: c.offsite.perWalletDailyClaims, perWalletDailyUsd: c.offsite.perWalletDailyUsd, perWalletWeeklyUsd: c.offsite.perWalletWeeklyUsd, dailyPoolBps: c.offsite.dailyPoolBps, targetReserveUsd: c.offsite.targetReserveUsd }, breaker: c.breaker, pausedPacks: c.pausedPacks, paused: c.paused, gas: { maxUsdPerDay: c.gas.maxUsdPerDay } };
 }

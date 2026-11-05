@@ -50,13 +50,13 @@ for (const asset of assets) {
 if (gateway) assert.equal((await fetch(`${base}/assets/does-not-exist.js`)).status, 404, 'Missing assets are 404s, not index.html');
 passed.push('pages and assets');
 
-// The previous domain and www redirect to pullback.cards with the path kept. fetch cannot set Host.
+// The previous domains and www redirect to regrade.cards with the path kept. fetch cannot set Host.
 if (gateway) {
-  for (const host of ['packprotection.xyz', 'www.pullback.cards']) {
+  for (const host of ['packprotection.xyz', 'pullback.cards', 'www.pullback.cards', 'www.regrade.cards']) {
     const response = await new Promise((resolve, reject) => (base.startsWith('https:') ? httpsRequest : httpRequest)(`${base}/claim?from=old`, { headers: { host } }, resolve).on('error', reject).end());
     response.resume();
     assert.equal(response.statusCode, 301, host);
-    assert.equal(response.headers.location, 'https://pullback.cards/claim?from=old', host);
+    assert.equal(response.headers.location, 'https://regrade.cards/claim?from=old', host);
   }
   passed.push('domain redirects');
 }
@@ -82,7 +82,7 @@ const key = Keypair.generate();
 const challenge = await (await post('/api/auth/challenge', { wallet: key.publicKey.toBase58() })).json();
 const login = await post('/api/auth/verify', { id: challenge.id, signature: bs58.encode(nacl.sign.detached(new TextEncoder().encode(challenge.message), key.secretKey)) });
 const cookie = login.headers.get('set-cookie').split(';')[0];
-assert.ok(cookie.startsWith('pp_session='));
+assert.ok(cookie.startsWith('rg_session='));
 assert.match(login.headers.get('set-cookie'), /HttpOnly/i);
 const me = await (await fetch(`${base}/api/me`, { headers: { cookie } })).json();
 assert.equal(me.wallet, key.publicKey.toBase58());

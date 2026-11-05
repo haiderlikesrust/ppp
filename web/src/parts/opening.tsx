@@ -1,85 +1,73 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Card, OrderStatus } from '../../../shared/types';
 import { money } from '../api';
-import { Booster, Slab, isWatch, packStyle } from '../ui';
+import { Booster, TradingCard, isWatch, packStyle, useCount } from '../ui';
 
-const SPARKS = Array.from({ length: 10 }, (_, i) => {
-  const angle = (i / 10) * Math.PI * 2 + 0.3;
-  return { dx: `${Math.round(Math.cos(angle) * 84)}px`, dy: `${Math.round(Math.sin(angle) * 96)}px`, delay: `${(i % 5) * 0.2}s` };
-});
-const BURST = Array.from({ length: 12 }, (_, i) => {
-  const angle = (i / 12) * Math.PI * 2;
-  return { dx: `${Math.round(Math.cos(angle) * 110)}px`, dy: `${Math.round(Math.sin(angle) * 120)}px` };
-});
-const COINS = [-48, -26, -8, 12, 30, 50];
-const LEDS = 8;
-/** When the card has finished flipping up, counted from the moment it arrived. */
-const REVEALED_MS = 1500;
+/** When the card has finished flipping in, counted from the moment it arrived. */
+const SETTLED_MS = 1700;
+const SPARKLES = [[10, 14, 0], [86, 10, 0.4], [6, 62, 0.8], [92, 58, 0.2], [20, 84, 0.6], [78, 86, 1]];
 
 type Phase = 'insert' | 'confirm' | 'open' | 'reveal' | 'done' | 'failed';
 
 /**
- * The order screen's gacha machine, in a lit display case that keeps every effect inside it.
- * A coin drops in while the payment confirms; the machine shakes under a light sweep while Collector
- * Crypt opens the pack; then a flash, a capsule pops out and splits, and the real card flips up out of
- * it. A hit gets rays and a burst; a bad pull gets green coins and its rebate. Reopening a finished
- * order just shows the card.
+ * The opening. The pack floats while the payment confirms, and energy charges in a ring around it, in its own
+ * element's color, while Collector Crypt opens it. Then it fades into a flash and the card swings up into place.
+ * A hit sends out yellow ripples and sparkles. A bad pull gets a mint Regraded sticker with its rebate counting up.
+ * Reopening a finished order just shows the result.
  */
 export function PackOpening({ code, priceUsd, status, card, hit, rebateUsd = null, replay = false }: { code: string; priceUsd: number; status?: OrderStatus; card: Card | null; hit: boolean; rebateUsd?: number | null; replay?: boolean }) {
-  // The reveal only plays if this screen showed the machine first, or, with `replay`, every time it mounts.
+  // The reveal only plays if this screen showed the pack first, or, with `replay`, every time it mounts.
   const watched = useRef(replay || !card).current;
   const arrived = useRef<number | null>(null);
   if (card && arrived.current === null) arrived.current = watched ? Date.now() : 0;
+  const settled = useSettled(arrived.current);
 
   const failed = status === 'refunded' || status === 'expired' || status === 'review' || status === 'refunding';
   const phase: Phase = failed ? 'failed' : card ? (status === 'complete' ? 'done' : 'reveal') : status === 'paying' ? 'confirm' : status === 'paid' || status === 'buying' ? 'open' : 'insert';
-  const back = card && !hit && status === 'complete' && rebateUsd ? rebateUsd : 0;
+  const back = card && !hit && status === 'complete' && rebateUsd ? rebateUsd : 0, ready = phase === 'done' && settled;
   const caption = {
-    insert: 'Insert USDC', confirm: 'Confirming', open: 'Opening', reveal: status === 'settling' ? 'Checking value' : 'Sending card',
-    done: hit ? 'Hit!' : back ? 'Rebate sent' : 'Done',
+    insert: 'Waiting for your wallet', confirm: 'Confirming payment', open: 'Opening your pack', reveal: status === 'settling' ? 'Checking its value' : 'Sending your card',
+    done: hit ? 'A hit!' : back ? 'Regraded' : 'Done',
     failed: status === 'refunding' ? 'Refunding' : status === 'refunded' ? 'Refunded' : status === 'expired' ? 'Closed' : 'On hold',
   }[phase];
-  const glow = { '--glow': packStyle(code, priceUsd).color } as CSSProperties;
 
-  return <div className="stage mx-auto h-[330px] w-full max-w-[240px]" style={glow}>
-    {(!card || watched) && <div className={`absolute left-[10%] right-[10%] top-[5%] ${card ? 'machine-out' : ''}`} aria-hidden={!!card}>
-      <div className={phase === 'open' ? 'rumble' : phase === 'failed' ? 'opacity-40 grayscale' : 'bob'}><Booster code={code} priceUsd={priceUsd} /></div>
-      {phase === 'open' && <div className="sweep" aria-hidden="true" />}
+  return <div className="stage mx-auto flex h-[470px] w-full max-w-[320px] flex-col items-center justify-center px-10 pb-8" style={{ '--glow': packStyle(code, priceUsd).color } as CSSProperties}>
+    {(!card || watched) && <div className={`absolute inset-x-[15%] top-[17%] ${card ? 'pack-out' : ''}`} aria-hidden={!!card}>
+      <div className={phase === 'failed' ? 'opacity-40 grayscale' : phase === 'open' ? 'pack-charge' : card ? '' : 'float'}><Booster code={code} priceUsd={priceUsd} /></div>
     </div>}
-    {phase === 'confirm' && <i className="coin" aria-hidden="true" />}
-    {phase === 'open' && SPARKS.map((s, i) => <i key={i} className="pixel-spark" style={{ '--dx': s.dx, '--dy': s.dy, animationDelay: s.delay } as CSSProperties} aria-hidden="true" />)}
+    {phase === 'open' && <i className="charge" aria-hidden="true" />}
+    {card && watched && <i className="flash" aria-hidden="true" />}
+    {!card && phase !== 'failed' && <div className="sr-only">{caption}</div>}
 
-    {card && watched && <>
-      <div className="flash" aria-hidden="true" />
-      <i className="cap cap-top" aria-hidden="true" /><i className="cap cap-bottom" aria-hidden="true" />
-    </>}
-
-    {card && <div className="absolute inset-x-0 top-[5%] z-[3] mx-auto w-[60%]">
-      {hit && <Afterglow since={arrived.current!}>{at => <>
-        <div className="shiny" style={{ animationDelay: `0s, ${at}s` }} aria-hidden="true" />
-        {watched && BURST.map((b, i) => <i key={i} className="shiny-burst" style={{ '--dx': b.dx, '--dy': b.dy, animationDelay: `${at}s` } as CSSProperties} aria-hidden="true" />)}
-      </>}</Afterglow>}
-      <div className={watched ? 'card-flip' : 'enter'}>
-        <div className="relative"><Slab card={card} priceUsd={priceUsd} watch={isWatch(code)} />{watched && <i className="slab-shine" aria-hidden="true" />}</div>
+    {card && <div className="relative z-[3] w-full">
+      {hit && ready && <>{[0, 0.8, 1.6].map(d => <i key={d} className="ripple" aria-hidden="true" style={{ '--d': `${d}s` } as CSSProperties} />)}{SPARKLES.map(([x, y, d], i) => <i key={i} className="sparkle" aria-hidden="true" style={{ left: `${x}%`, top: `${y}%`, '--d': `${d}s` } as CSSProperties} />)}</>}
+      <div className={watched ? 'card-arrive' : 'enter'}>
+        <TradingCard card={card} priceUsd={priceUsd} watch={isWatch(code)} holo={hit && ready} tilt={ready} />
       </div>
-      {back > 0 && <Afterglow since={arrived.current!}>{at => <>
-        <div className="absolute -right-7 top-[44%] z-[4] rotate-[-8deg]"><div className="pop tag h-7 bg-gain px-2.5 text-xs text-night shadow-lg" style={{ animationDelay: `${at}s` }}>+{money(back)} back</div></div>
-        {watched && COINS.map((dx, i) => <i key={i} className="rebate-coin" style={{ '--dx': `${dx}px`, animationDelay: `${at + i * 0.09}s` } as CSSProperties} aria-hidden="true" />)}
-      </>}</Afterglow>}
+      {ready && back > 0 && <div className="pop-in absolute inset-x-0 -bottom-4 z-[4] grid place-items-center"><Rebate amount={back} /></div>}
+      {ready && hit && <div className="pop-in absolute inset-x-0 -bottom-4 z-[4] grid place-items-center"><span className="sticker sticker-hit">Above the pack!</span></div>}
     </div>}
 
-    <div className="absolute inset-x-0 bottom-0 z-[6] flex h-8 items-center justify-between gap-3 border-t border-line bg-night/90 px-3" aria-hidden="true">
-      <span className={`pixel truncate text-[10px] uppercase ${phase === 'failed' ? 'text-loss' : phase === 'done' ? (hit ? 'text-volt' : 'text-gain') : 'text-muted'}`}>{caption}</span>
-      <span className={`leds ${phase} ${hit ? 'hit' : ''}`}>{Array.from({ length: LEDS }, (_, i) => <i key={i} style={{ '--i': i } as CSSProperties} />)}</span>
+    <div className="label absolute inset-x-0 bottom-0 z-[6] flex h-9 items-center justify-center px-3 text-center" aria-hidden="true">
+      <span className={phase === 'failed' ? 'text-loss' : phase === 'done' ? (hit ? 'text-warn' : 'text-gain') : ''}>{caption}</span>
     </div>
   </div>;
 }
 
-/**
- * Effects that follow the reveal: they wait until the card has flipped up, however late the value or
- * rebate arrives. The delay is fixed when they first appear, so later renders don't restart them.
- */
-function Afterglow({ since, children }: { since: number; children: (delaySeconds: number) => ReactNode }) {
-  const [at] = useState(() => since ? Math.max(0.1, (since + REVEALED_MS - Date.now()) / 1000) : 0);
-  return <>{children(at)}</>;
+function Rebate({ amount }: { amount: number }) {
+  const shown = useCount(amount);
+  return <span className="sticker num">Regraded +{money(Math.round(shown * 100) / 100)}</span>;
+}
+
+/** True once the card has finished arriving, however late the value or rebate comes. */
+function useSettled(arrived: number | null) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (arrived === null || done) return;
+    const left = arrived + SETTLED_MS - Date.now();
+    if (left <= 0 || matchMedia('(prefers-reduced-motion: reduce)').matches) { setDone(true); return; }
+    const t = setTimeout(() => setDone(true), left);
+    return () => clearTimeout(t);
+  }, [arrived, done]);
+  return done;
 }
