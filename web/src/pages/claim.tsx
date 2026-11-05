@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ArrowUpRight, Loader2, ScanSearch } from 'lucide-react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { ArrowUpRight, Clock, Coins, Gauge, Loader2, ScanSearch, Timer, TrendingDown, Wallet, type LucideIcon } from 'lucide-react';
 import type { ClaimCandidate } from '../../../shared/types';
 import { windowLabel } from '../../../shared/protection';
 import { ago, api, money, pct, short, solscan } from '../api';
 import { useApp } from '../app';
 import { CoverageLadder } from '../parts/holder';
-import { PageHead, SectionTitle, TypeBadge, packStyle } from '../ui';
+import { PageHead, RebateBar, SectionTitle, TypeBadge, packStyle } from '../ui';
 
 type Holding = { firstAt: number | null; complete: boolean; holds: boolean | null };
 type Claim = { memo: string; status: string; priceUsd: number; valueUsd: number; rebateUsd: number; signature: string | null; createdAt: number };
@@ -15,6 +15,8 @@ const STATUS: Record<string, [string, string]> = {
 };
 /** Claims that can still change; only these are refreshed. */
 const MOVING = ['approved', 'paying', 'queued'];
+/** How far along each status is, out of the three steps a claim takes. */
+const PROGRESS: Record<string, number> = { approved: 1, queued: 1, paying: 2, paid: 3 };
 
 export function ClaimPage() {
   const { me, config, connect, notify, version } = useApp();
@@ -68,111 +70,126 @@ export function ClaimPage() {
   const window = windowLabel(o?.claimWindowHours ?? 48);
   const daily = [(o?.perWalletDailyClaims ?? 0) > 0 && `${o.perWalletDailyClaims} claim${o.perWalletDailyClaims > 1 ? 's' : ''}`, (o?.perWalletDailyUsd ?? 0) > 0 && money(o.perWalletDailyUsd)].filter(Boolean);
   const eligible = candidates?.filter(c => c.eligible) ?? [], other = candidates?.filter(c => !c.eligible) ?? [];
+  const total = eligible.reduce((s, c) => s + c.rebateUsd, 0);
   const screen = !me.wallet ? ['No wallet yet', 'Connect the wallet that opened the pack.']
-    : busy === 'scan' ? ['Scanning', `Reading ${short(me.wallet)} for pack payments…`]
-    : candidates ? [`${candidates.length} pack${candidates.length === 1 ? '' : 's'} found`, eligible.length ? `${eligible.length} to claim, worth ${money(eligible.reduce((s, c) => s + c.rebateUsd, 0))}.` : 'Nothing to claim right now.']
+    : busy === 'scan' ? ['Scanning…', `Reading ${short(me.wallet)} for pack payments.`]
+    : candidates ? [eligible.length ? `${money(total)} to claim` : 'Nothing to claim', `${candidates.length ? `${candidates.length} pack${candidates.length === 1 ? '' : 's'}` : 'No packs'} found in the last ${window}.`]
     : ['Ready to scan', `Wallet ${short(me.wallet)}. Pulls from the last ${window}.`];
+  const rules: [LucideIcon, string, string][] = [
+    [Coins, 'Sells back under the pack', 'We use the live sell-back offer, usually 85–93% of insured value, not the insured value itself.'],
+    [Clock, `Opened in the last ${window}`, 'Bought and delivered to this same wallet, on any app. Each pack can be claimed once.'],
+    [Wallet, 'Opened after you bought in', `We read your coin history on-chain. Packs opened before you first held the coin aren't covered${hold > 0 ? `, and you need to have held it for ${hold}h before the pull` : ''}.`],
+    [TrendingDown, 'Your grade is your lowest balance since', 'Selling after the pull lowers it, even if you buy back.'],
+    ...(activation > 0 ? [[Timer, `Starts ${activation}h after connecting`, 'Pulls from before that are not covered.'] as [LucideIcon, string, string]] : []),
+    // Limits only show when the owner sets some; by default claims are unlimited.
+    ...(daily.length || (o?.perWalletWeeklyUsd ?? 0) > 0 ? [[Gauge, daily.length ? `Up to ${daily.join(' and ')} a day` : 'No daily limit', (o?.perWalletWeeklyUsd ?? 0) > 0 ? `At most ${money(o.perWalletWeeklyUsd)} a week.` : ''] as [LucideIcon, string, string]] : []),
+  ];
 
   return <>
-    <PageHead kicker="Off-site claims" title={<>Claim a pull from <em>anywhere.</em></>} sub="Opened a pack on Collector Crypt, pump.fun or Jupiter that came in under the pack price? Claim part of the difference back. You keep the card." />
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
-    {/* Results */}
-    <section className="min-w-0 lg:order-1">
-      {found && <div className="card enter mt-6 overflow-hidden border-accent/40"><div className="border-b border-line bg-raised px-5 py-2"><span className="label">Found from your link</span></div><ClaimRow c={found} busy={busy === found.memo} onClaim={() => claim(found)} /></div>}
+    <PageHead kicker="Off-site claims" title="Claim back a weak pull." sub="Opened a Collector Crypt pack on another app and it sells back for less than you paid? Claim part of the gap in USDC. You keep the card." />
 
-      {!candidates ? <div className="mt-6 grid place-items-center rounded-xl border border-dashed border-line px-6 py-16 text-center">
-        <ScanSearch size={34} className="text-accent" />
-        <div className="font-semibold mt-4 text-lg">Nothing scanned yet</div>
-        <p className="mt-1 max-w-sm text-sm text-muted">{me.wallet ? `Scan to list every Collector Crypt pack this wallet opened in the last ${window}, on any app, and what each one can get back.` : 'Connect the wallet that opened the pack, then scan.'}</p>
-      </div> : <>
-        <div className="mt-8">
-          <SectionTitle title={eligible.length ? `${eligible.length} to claim` : 'Nothing to claim'} sub={candidates.length ? `${candidates.length} pack${candidates.length > 1 ? 's' : ''} found in the last ${window}.` : `No Collector Crypt packs from this wallet in the last ${window}.`} />
-          {eligible.length > 0 && <div className="card overflow-hidden">{eligible.map(c => <ClaimRow key={c.memo} c={c} busy={busy === c.memo} onClaim={() => claim(c)} />)}</div>}
-        </div>
-        {other.length > 0 && <div className="mt-6">
-          <button className="font-semibold flex w-full items-center justify-between rounded-xl border border-line px-4 py-3 text-left text-sm text-muted hover:text-ink" onClick={() => setShowOther(v => !v)} aria-expanded={showOther}>
-            {other.length} that don't qualify<span>{showOther ? '−' : '+'}</span>
-          </button>
-          {showOther && <div className="card mt-2 overflow-hidden">{other.map(c => <ClaimRow key={c.memo} c={c} busy={false} onClaim={() => {}} />)}</div>}
-        </div>}
-      </>}
-
-      {claims.length > 0 && <div className="mt-10">
-        <SectionTitle title="Your claims" />
-        <div className="card overflow-hidden">
-          {claims.map(c => <div key={c.memo} className="grid grid-cols-[auto_1fr_auto] items-center gap-x-4 gap-y-1 border-b border-line px-4 py-3 text-sm last:border-0 sm:px-5">
-            <TypeBadge priceUsd={c.priceUsd} size={24} />
-            <div className="min-w-0"><span className="font-display num">{money(c.priceUsd)} pack</span> <span className="num text-muted">· worth {money(c.valueUsd)} · {ago(c.createdAt)}</span></div>
-            <span className="font-display num text-gain">+{money(c.rebateUsd)}</span>
-            <span />
-            <div className="flex flex-wrap items-center gap-3"><span className={`tag ${STATUS[c.status]?.[1] ?? 'bg-raised text-muted'}`}>{STATUS[c.status]?.[0] ?? c.status}</span>
-              {c.signature && <a className="text-xs text-muted hover:text-accent" href={solscan('tx', c.signature)} target="_blank" rel="noreferrer">Payout <ArrowUpRight className="inline" size={12} /></a>}</div>
-          </div>)}
-        </div>
-      </div>}
-
-      <div className="mt-12"><CoverageLadder mode="offsite" /></div>
-    </section>
-
-    {/* Scanner */}
-    <aside className="enter lg:sticky lg:top-24 lg:order-2 lg:self-start">
-      <div className="card overflow-hidden">
-        <div className="border-b border-line px-5 py-3"><span className="label">Wallet scanner</span></div>
-        <div className="p-5">
-          <div aria-live="polite">
-            <div className="font-display text-2xl font-bold leading-tight">{screen[0]}{busy === 'scan' && '…'}</div>
-            <div className="mt-1 text-xs text-muted">{screen[1]}</div>
+    <section className="pb-10">
+      <div className="card enter relative overflow-hidden">
+        {busy === 'scan' && <i className="scan-beam" />}
+        <div className="grid items-center gap-x-10 gap-y-5 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <div className="min-w-0" aria-live="polite">
+            <div className="label">Wallet scanner</div>
+            <div className="font-display num mt-1 text-3xl font-bold leading-tight tracking-tight sm:text-4xl">{screen[0]}</div>
+            <div className="mt-1 text-sm text-muted">{screen[1]}</div>
           </div>
-          {me.wallet && <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-line px-3 py-2.5 text-xs">
-            <span className="label">You bought in</span>
-            <span className="num text-right">{!holding ? <span className="text-faint">Scan to check</span>
+          {me.wallet && <div className="min-w-0">
+            <div className="label">You bought in</div>
+            <div className="num mt-1 text-sm">{!holding ? <span className="text-faint">Scan to check</span>
               : holding.firstAt ? <>{when(holding.firstAt)} <span className="text-muted">· {ago(holding.firstAt)}</span></>
               : holding.holds === false ? <span className="text-loss">No coin in this wallet</span>
-              : holding.complete ? <span className="text-loss">Never</span> : <span className="text-muted">Long ago</span>}</span>
+              : holding.complete ? <span className="text-loss">Never</span> : <span className="text-muted">Long ago</span>}</div>
           </div>}
-          <button className="btn btn-primary mt-4 h-12 w-full" onClick={() => me.wallet ? scan() : connect()} disabled={busy === 'scan'}>
+          <button className="btn btn-primary h-12 w-full px-6 lg:w-auto" onClick={() => me.wallet ? scan() : connect()} disabled={busy === 'scan'}>
             {busy === 'scan' ? <Loader2 className="animate-spin" size={17} /> : <ScanSearch size={17} />}{me.wallet ? (candidates ? 'Scan again' : 'Scan my wallet') : 'Connect to scan'}</button>
-
-          <form onSubmit={lookup} className="mt-5 border-t border-line pt-5">
-            <label htmlFor="tx" className="label">Missing a pull?</label>
-            <p className="mt-1 text-xs text-muted">Paste the Solscan link or signature of the pack purchase.</p>
-            <div className="mt-2 flex gap-2">
-              <input id="tx" className="input min-w-0 flex-1" value={pasted} onChange={e => setPasted(e.target.value)} placeholder="solscan.io/tx/…" />
-              <button className="btn btn-outline shrink-0" disabled={busy === 'lookup' || !pasted.trim() || !me.wallet}>{busy === 'lookup' ? <Loader2 className="animate-spin" size={15} /> : 'Find'}</button>
-            </div>
-          </form>
         </div>
-        <ol className="border-t border-line bg-raised/40 px-5 py-4 text-sm">
-          {[[`Opened in the last ${window}`, 'Bought and delivered to this same wallet, on any app. Each pack can be claimed once.'],
-            ['Opened after you bought in', `We read your coin history on-chain. Packs opened before you first held the coin aren't covered${hold > 0 ? `, and you need to have held it for ${hold}h before the pull` : ''}.`],
-            ['Your tier is your lowest balance since', 'Selling after the pull lowers it, even if you buy back.'],
-            ...(activation > 0 ? [[`Starts ${activation}h after connecting`, 'Pulls from before that are not covered.']] : []),
-            // Limits only show when the owner sets some; by default claims are unlimited.
-            ...(daily.length || (o?.perWalletWeeklyUsd ?? 0) > 0 ? [[daily.length ? `Up to ${daily.join(' and ')} a day` : 'No daily limit', (o?.perWalletWeeklyUsd ?? 0) > 0 ? `At most ${money(o.perWalletWeeklyUsd)} a week.` : '']] : [])].map(([title, text], i) =>
-            <li key={i} className="flex gap-3 py-1.5"><span className="font-semibold w-5 shrink-0 text-xs text-accent">{i + 1}</span><span><span className="text-ink">{title}.</span> <span className="text-muted">{text}</span></span></li>)}
-        </ol>
+        <form onSubmit={lookup} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line px-5 py-3.5 sm:px-7">
+          <label htmlFor="tx" className="text-sm text-muted">Missing a pull? <span className="text-faint">Paste its Solscan link or signature.</span></label>
+          <div className="flex min-w-[min(100%,16rem)] flex-1 gap-2">
+            <input id="tx" className="input min-w-0 flex-1" value={pasted} onChange={e => setPasted(e.target.value)} placeholder="solscan.io/tx/…" />
+            <button className="btn btn-outline shrink-0" disabled={busy === 'lookup' || !pasted.trim() || !me.wallet}>{busy === 'lookup' ? <Loader2 className="animate-spin" size={15} /> : 'Find'}</button>
+          </div>
+        </form>
       </div>
-      <p className="mt-3 px-1 text-xs text-muted">Packs opened on Regrade are paid back automatically. This page is for packs opened on Collector Crypt, pump.fun, Jupiter or any other app that sells Collector Crypt packs.</p>
-    </aside>
-    </div>
+    </section>
+
+    <section className="grid gap-3 pb-14">
+      {found && <><div className="label">Found from your link</div><Ticket c={found} busy={busy === found.memo} onClaim={() => claim(found)} /></>}
+      {!candidates ? <div className="grid gap-3" aria-label="No scan yet">
+        <div className="ticket-ghost"><ScanSearch size={22} className="shrink-0 text-accent" /><p className="text-sm text-muted">{me.wallet ? `Your packs from the last ${window}, on any app, will show up here as tickets you can cash in.` : 'Connect the wallet that opened the pack, then scan.'}</p></div>
+        <div className="ticket-ghost opacity-50" /><div className="ticket-ghost opacity-25" />
+      </div>
+        : eligible.length ? eligible.map(c => <Ticket key={c.memo} c={c} busy={busy === c.memo} onClaim={() => claim(c)} />)
+        : <div className="ticket-ghost"><p className="text-sm text-muted">{candidates.length ? 'None of these packs can be claimed right now.' : `No Collector Crypt packs from this wallet in the last ${window}.`}</p></div>}
+      {other.length > 0 && <div className="mt-2">
+        <button className="font-semibold flex items-center gap-2 text-sm text-muted hover:text-ink" onClick={() => setShowOther(v => !v)} aria-expanded={showOther}><span className="num">{showOther ? '−' : '+'}</span>{other.length} that {other.length === 1 ? "doesn't" : "don't"} qualify</button>
+        {showOther && <div className="mt-2 border-t border-line">{other.map(c => <Skipped key={c.memo} c={c} />)}</div>}
+      </div>}
+    </section>
+
+    {claims.length > 0 && <section className="pb-14">
+      <SectionTitle title="Your claims" sub="Approved, then paying, then paid. This updates on its own." />
+      <div className="border-t border-line">{claims.map(c => <div key={c.memo} className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-line py-3 text-sm">
+        <TypeBadge priceUsd={c.priceUsd} size={24} />
+        <div className="min-w-0 flex-[1_1_12rem]"><span className="font-display num">{money(c.priceUsd)} pack</span> <span className="num text-muted">· insured {money(c.valueUsd)} · {ago(c.createdAt)}</span></div>
+        {PROGRESS[c.status] && <div className="flex w-20 gap-0.5" aria-hidden="true">{[0, 1, 2].map(i => <i key={i} className={`h-1.5 flex-1 rounded-sm ${i < PROGRESS[c.status] ? 'bg-chart-out' : 'bg-raised'}`} />)}</div>}
+        <span className={`tag ${STATUS[c.status]?.[1] ?? 'bg-raised text-muted'}`}>{STATUS[c.status]?.[0] ?? c.status}</span>
+        {c.signature && <a className="text-xs text-muted hover:text-accent" href={solscan('tx', c.signature)} target="_blank" rel="noreferrer">Payout <ArrowUpRight className="inline" size={12} /></a>}
+        <span className="font-display num w-20 text-right text-gain">+{money(c.rebateUsd)}</span>
+      </div>)}</div>
+    </section>}
+
+    <section className="pb-14">
+      <SectionTitle title="What counts" />
+      <ul className="grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">{rules.map(([Icon, title, text]) => <li key={title} className="flex gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-[10px] bg-accent-soft text-accent"><Icon size={17} /></span>
+        <div className="min-w-0"><div className="font-semibold text-sm">{title}</div>{text && <p className="mt-0.5 text-sm text-muted">{text}</p>}</div>
+      </li>)}</ul>
+    </section>
+
+    <section className="pb-8"><CoverageLadder mode="offsite" /></section>
+    <p className="pb-4 text-xs text-faint">Packs opened on Regrade are paid back automatically. This page is for packs opened on Collector Crypt, pump.fun, Jupiter or any other app that sells Collector Crypt packs.</p>
   </>;
 }
 
 /** "Oct 19, 14:02" in the visitor's own time zone. */
 const when = (at: number) => new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-function ClaimRow({ c, busy, onClaim }: { c: ClaimCandidate; busy: boolean; onClaim: () => void }) {
-  const p = packStyle(c.packCode, c.priceUsd);
-  return <div className="flex flex-col gap-3 border-b border-line px-5 py-4 last:border-0 sm:flex-row sm:items-center sm:gap-6">
-    
-    <div className="min-w-0 flex-1">
-      <div className="flex flex-wrap items-center gap-x-3"><span className="font-display flex items-center gap-2"><TypeBadge code={c.packCode} priceUsd={c.priceUsd} size={22} />{p.name} · {money(c.priceUsd)}</span><span className="text-xs text-faint">{ago(c.pulledAt)}</span>
-        <a className="text-xs text-muted hover:text-accent" href={solscan('tx', c.signature)} target="_blank" rel="noreferrer">payment <ArrowUpRight className="inline" size={11} /></a></div>
-      <div className="mt-0.5 text-sm text-muted">{c.valueUsd !== null ? <>Worth <span className="num text-ink">{money(c.valueUsd)}</span>{c.valueUsd < c.priceUsd && <> · <span className="num text-loss">−{money(c.priceUsd - c.valueUsd)}</span></>}</> : 'Value unknown'}{!c.eligible && c.reason && !c.claim && <> · {c.reason}</>}</div>
+/** A pull that can be claimed, drawn as a ticket: the pull on one side, and a stub to cash in on the other. */
+function Ticket({ c, busy, onClaim }: { c: ClaimCandidate; busy: boolean; onClaim: () => void }) {
+  const p = packStyle(c.packCode, c.priceUsd), sell = c.sellUsd ?? c.valueUsd, title = c.card?.name?.split(' · ')[0] ?? `${p.name} pack`;
+  return <article className="ticket enter" style={{ '--pack': p.color } as CSSProperties}>
+    <div className="flex min-w-0 gap-4 p-4 sm:p-5">
+      {c.card?.image ? <img src={c.card.image} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-[84px] w-[52px] shrink-0 rounded-md object-cover" /> : <TypeBadge code={c.packCode} priceUsd={c.priceUsd} size={40} />}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <h3 className="font-semibold truncate" title={c.card?.name ?? undefined}>{title}</h3>
+          <span className="text-xs text-faint">{ago(c.pulledAt)} · <a className="hover:text-accent" href={solscan('tx', c.signature)} target="_blank" rel="noreferrer">payment <ArrowUpRight className="inline" size={11} /></a></span>
+        </div>
+        <div className="num text-xs text-muted">{p.name} {money(c.priceUsd)}{c.valueUsd !== null && ` · insured at ${money(c.valueUsd)}`}</div>
+        {sell !== null && <div className="mt-3"><RebateBar priceUsd={c.priceUsd} valueUsd={sell} rebateUsd={c.rebateUsd} /></div>}
+      </div>
     </div>
-    {c.eligible ? <div className="flex items-center justify-between gap-4 sm:justify-end">
-      <div className="sm:text-right"><div className="font-display num text-lg text-gain">+{money(c.rebateUsd)}</div><div className="text-xs text-muted">{pct(c.coverageBps)} of the loss</div></div>
-      <button className="btn btn-primary" disabled={busy} onClick={onClaim}>{busy && <Loader2 className="animate-spin" size={15} />}Claim</button>
-    </div> : c.claim ? <span className={`tag self-start sm:self-auto ${STATUS[c.claim.status]?.[1] ?? 'bg-raised text-muted'}`}>{STATUS[c.claim.status]?.[0] ?? c.claim.status} · {money(c.claim.rebateUsd)}</span> : null}
+    <div className="ticket-stub">
+      <div><div className="font-display num text-3xl font-bold leading-none tracking-tight text-gain">+{money(c.rebateUsd)}</div><div className="mt-1 text-xs text-muted">{pct(c.coverageBps)} of the gap</div></div>
+      <button className="btn btn-primary mt-3 w-full max-sm:mt-0 max-sm:w-auto" disabled={busy} onClick={onClaim}>{busy && <Loader2 className="animate-spin" size={15} />}Claim</button>
+    </div>
+  </article>;
+}
+
+/** A pack the scan found that can't be claimed, with why, or the claim already made on it. */
+function Skipped({ c }: { c: ClaimCandidate }) {
+  const p = packStyle(c.packCode, c.priceUsd);
+  return <div className="flex items-center gap-3 border-b border-line py-2.5 text-sm">
+    <TypeBadge code={c.packCode} priceUsd={c.priceUsd} size={24} />
+    <div className="min-w-0 flex-1">
+      <div className="truncate"><span className="font-display">{p.name} {money(c.priceUsd)}</span> <span className="text-xs text-faint">{ago(c.pulledAt)}</span></div>
+      <div className="text-xs text-muted">{c.valueUsd === null ? 'Value unknown' : c.sellUsd !== null ? `Sells back for ${money(c.sellUsd)}` : `Insured at ${money(c.valueUsd)}`}{!c.claim && c.reason && ` · ${c.reason}`}</div>
+    </div>
+    {c.claim && <span className={`tag shrink-0 ${STATUS[c.claim.status]?.[1] ?? 'bg-raised text-muted'}`}>{STATUS[c.claim.status]?.[0] ?? c.claim.status} · {money(c.claim.rebateUsd)}</span>}
   </div>;
 }

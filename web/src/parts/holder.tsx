@@ -22,16 +22,16 @@ export function CoverageLadder({ mode = 'onsite' }: { mode?: 'onsite' | 'offsite
       {!me.wallet && <button className="btn btn-primary btn-sm" onClick={connect}>Connect wallet</button>}
     </div>
 
-    <div className="mt-5 grid gap-4 sm:grid-cols-3">
+    <div className="card mt-5 grid divide-y divide-line overflow-hidden sm:grid-cols-3 sm:divide-x sm:divide-y-0">
       {tiers.map(t => {
         const reached = !!me.wallet && level >= t.minSupplyPpm, here = t.id === current;
-        return <div key={t.id} className={`card min-w-0 p-5 ${here ? 'border-accent bg-accent-soft' : ''}`}>
+        return <div key={t.id} className={`min-w-0 p-5 ${here ? 'bg-accent-soft' : ''}`}>
           <div className="flex items-center justify-between gap-2">
             <span className="font-display truncate text-xl">{t.name}</span>
             {here ? <span className="tag bg-accent text-on-accent">You</span> : reached ? <span className="tag bg-raised text-muted">Reached</span> : null}
           </div>
           <div className="font-display num mt-3 text-5xl font-bold leading-none tracking-tight">{pct(mode === 'onsite' ? t.onsiteCoverageBps : t.offsiteCoverageBps)}</div>
-          <div className="mt-1.5 text-sm text-muted">{mode === 'onsite' ? 'of a loss back, at most' : 'of a loss back'}</div>
+          <div className="mt-1.5 text-sm text-muted">{mode === 'onsite' ? 'of the gap back, at most' : 'of the gap back'}</div>
           <div className="num mt-3 text-xs text-muted">Hold {share(t.minSupplyPpm)}+ of supply</div>
         </div>;
       })}
