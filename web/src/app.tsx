@@ -4,7 +4,7 @@ import type { HolderView } from '../../shared/types';
 import { BRAND } from '../../shared/brand';
 import { api, short } from './api';
 import { forget, onAccountSwitch, signIn, useWallets } from './wallet';
-import { Logo, Modal, Toast, Wordmark } from './ui';
+import { Modal, Toast, Wordmark } from './ui';
 import { OpenPage } from './pages/open';
 import { ClaimPage } from './pages/claim';
 import { PoolPage } from './pages/pool';
@@ -103,7 +103,7 @@ export function App() {
           <button onClick={theme.toggle} className="hidden size-9 place-items-center rounded-lg text-muted hover:bg-raised hover:text-ink xl:grid" aria-label={theme.dark ? 'Switch to light mode' : 'Switch to dark mode'}>{theme.dark ? <Sun size={18} /> : <Moon size={18} />}</button>
           <nav aria-label="Main" className="ml-auto hidden items-center gap-6 pr-5 xl:flex">{left.map(([href, label]) => <Link key={href} href={href} current={href === active} className="nav-link">{label}</Link>)}</nav>
         </div>
-        <Link href="/" className="flex items-center gap-2" title={`${BRAND.name} home`}><Logo size={34} /><Wordmark size="text-[1.5rem]" /></Link>
+        <Link href="/" className="flex items-center gap-2" title={`${BRAND.name} home`}><Wordmark size="text-[1.7rem]" /></Link>
         <div className="flex min-w-0 items-center">
           <nav aria-label="More" className="hidden items-center gap-6 pl-5 xl:flex">{right.map(([href, label]) => <Link key={href} href={href} current={href === active} className="nav-link">{label}</Link>)}</nav>
           <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -126,7 +126,7 @@ export function App() {
     <footer data-app-chrome className="border-t border-line">
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm sm:px-6 md:grid-cols-[1.1fr_1.9fr]">
         <div className="min-w-0">
-          <Link href="/" className="flex items-center gap-2.5"><Logo size={24} /><Wordmark size="text-[1.4rem]" /></Link>
+          <Link href="/" className="inline-flex"><Wordmark size="text-[1.5rem]" /></Link>
           <p className="mt-3 max-w-xs text-muted">{BRAND.tagline} Loss rebates on Collector Crypt packs, paid in USDC on Solana.</p>
           <XLink variant="inline" className="mt-3 text-muted" />
         </div>
@@ -139,7 +139,7 @@ export function App() {
     </footer>
 
     <Modal open={picker} onClose={() => setPicker(false)} label="Connect your wallet">
-      <Logo size={40} />
+      <Wordmark size="text-[1.7rem]" />
       <h2 className="font-display mt-4 text-3xl font-bold">Connect your wallet</h2>
       <p className="mt-1 text-sm text-muted">You'll sign a message to prove the wallet is yours. Signing in never approves a transaction.</p>
       <div className="mt-5 grid gap-2">

@@ -7,16 +7,13 @@ import { packDef } from '../../shared/packs';
 import { money } from './api';
 import { useShowcase } from './showcase';
 
-/** The mark: two cards, one behind the other, for the second grade, with a bolt of energy on the front one. */
+/** The bolt from the wordmark, on its own for tight spots. `size` is its height. */
 export function Logo({ size = 30 }: { size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-    <rect x="13" y="2.6" width="15.4" height="21.6" rx="4" transform="rotate(12 20.7 13.4)" fill="#ffcb05" />
-    <rect x="4.2" y="6.4" width="16.6" height="23.4" rx="4.4" transform="rotate(-6 12.5 18.1)" fill="#1f5be0" stroke="var(--color-surface)" strokeWidth="1.5" />
-    <path d="M14.5 10.7 8.7 19.1h3.9l-1.5 6.2 6.4-8.9h-4l1.3-5.7Z" fill="#fff" strokeLinejoin="round" />
-  </svg>;
+  return <svg height={size} width={size * 2 / 3} viewBox="0 0 16 24" aria-hidden="true" className="shrink-0"><path d="M10.2 1 1.5 13.5h5.3L5.4 23l9.1-13.2H9.1L10.2 1Z" fill="#ffcb05" /></svg>;
 }
+/** The logo: the name with a yellow bolt beside it. Size it with a text size. */
 export function Wordmark({ size = 'text-2xl' }: { size?: string }) {
-  return <span className={`font-display ${size} font-bold leading-none tracking-tight`}>Re<span className="display-grad">grade</span></span>;
+  return <span className={`font-display ${size} inline-flex items-center gap-[0.05em] font-bold leading-none tracking-tight`}>{BRAND.name}<svg viewBox="0 0 16 24" aria-hidden="true" className="h-[1em] w-auto shrink-0"><path d="M10.2 1 1.5 13.5h5.3L5.4 23l9.1-13.2H9.1L10.2 1Z" fill="#ffcb05" /></svg></span>;
 }
 
 /** Each Collector Crypt machine wears an element of its own. */

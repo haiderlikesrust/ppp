@@ -8,7 +8,7 @@ import { Modal, packStyle } from '../ui';
 import { XLogo } from './social';
 
 const W = 1200, H = 630;
-const INK = '#14151f', MUTED = '#565a70', LINE = '#dfe2ec', GAIN = '#0a8a62', BLUE = '#1f5be0', SPARK = '#ffcb05';
+const INK = '#14151f', MUTED = '#565a70', LINE = '#dfe2ec', GAIN = '#0a8a62', SPARK = '#ffcb05';
 const DISPLAY = '"Outfit Variable", sans-serif', BODY = '"Figtree Variable", sans-serif';
 
 function loadImage(src: string) {
@@ -57,8 +57,9 @@ async function drawCard(canvas: HTMLCanvasElement, p: SitePull) {
 
   // The result.
   const x = 520, right = W - 72, regraded = p.rebateUsd > 0, hit = p.valueUsd >= p.priceUsd;
-  c.font = `700 42px ${DISPLAY}`; c.fillStyle = INK; c.fillText('Re', x, 96);
-  const re = c.measureText('Re').width; c.fillStyle = BLUE; c.fillText('grade', x + re, 96);
+  // The wordmark: the name with its bolt.
+  c.font = `700 42px ${DISPLAY}`; c.fillStyle = INK; c.fillText(BRAND.name, x, 96);
+  c.save(); c.translate(x + c.measureText(BRAND.name).width + 3, 64); c.scale(1.5, 1.5); c.fillStyle = SPARK; c.fill(new Path2D('M10.2 1 1.5 13.5h5.3L5.4 23l9.1-13.2H9.1L10.2 1Z')); c.restore();
   c.fillStyle = style.color; c.beginPath(); c.arc(x + 11, 142, 11, 0, Math.PI * 2); c.fill();
   c.fillStyle = MUTED; c.font = `600 22px ${DISPLAY}`; c.fillText(`${style.name} ${money(p.priceUsd)} pack`, x + 32, 150);
   c.fillStyle = INK; c.font = `700 62px ${DISPLAY}`;
